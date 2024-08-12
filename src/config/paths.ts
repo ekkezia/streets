@@ -1,0 +1,1 @@
+export const PATHS =['https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/i-x-y-z-w/cash.glb?t=2024-08-12T15%3A35%3A24.634Z', 'https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/i-x-y-z-w/cheryl.glb', 'https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/i-x-y-z-w/haochen.glb?t=2024-08-12T15%3A35%3A59.634Z']
