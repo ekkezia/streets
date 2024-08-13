@@ -1,1 +1,1 @@
-export const PATHS =['https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/i-x-y-z-w/cash.glb?t=2024-08-12T15%3A35%3A24.634Z', 'https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/i-x-y-z-w/cheryl.glb', 'https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/i-x-y-z-w/haochen.glb?t=2024-08-12T15%3A35%3A59.634Z']
+export const PATHS =['/images/0.JPG', '/images/1.JPG', '/images/2.JPG', '/images/3.JPG', '/images/4.JPG', '/images/5.JPG', '/images/6.JPG', '/images/7.JPG', '/images/8.JPG', '/images/9.JPG']
