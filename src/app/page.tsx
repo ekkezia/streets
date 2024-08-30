@@ -1,9 +1,11 @@
- import ModelCanvas from '../components/molecules/model-canvas';
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
-  return (
-    <main className="fixed top-0 left-0 w-screen h-screen">
-      <ModelCanvas />
-    </main>
-  );
+  const router = useRouter()
+  useEffect(() => {
+    router.push('/jakarta/1')
+  }, [])
+
+  return <main className="fixed left-0 top-0 h-screen w-screen"></main>;
 }

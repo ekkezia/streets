@@ -11,7 +11,7 @@ const ModelContext = createContext<ModelContextType | undefined>(undefined);
 export const ModelContextProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  const [currentModel, setCurrentModel] = useState<number>(0);
+  const [currentModel, setCurrentModel] = useState<number>(1);
 
   return (
     <ModelContext.Provider value={{ currentModel, setCurrentModel }}>
