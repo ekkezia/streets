@@ -1,14 +1,14 @@
 import ModelCanvas from "@/components/molecules/model-canvas";
 import { CONFIG } from "@/config/config";
 
-export async function getStaticPaths() {
+export async function generateStaticParams() {
   const paths = [...Array(CONFIG["jkt"].numberOfImages)].map(
     (_, idx) => ({
-      params: { id: (idx + 1).toString() },
+      id: (idx + 1).toString(),
     }),
   );
 
-  return { paths, fallback: false };
+  return paths
 }
 
 export default async function Page({ params }: { params: { id: string } }) {
