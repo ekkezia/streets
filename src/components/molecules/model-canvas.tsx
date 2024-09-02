@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense, useEffect } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useLoader } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import ModelLoader from "../atoms/model-loader";
 import { GLTF } from "three/examples/jsm/Addons.js";
@@ -9,6 +9,7 @@ import { Move } from "../atoms/model-arrow";
 import ModelEnv from "../atoms/model-env";
 import { CONFIG, ProjectId } from "@/config/config";
 import { useModelContext } from "@/contexts/model-context";
+import { TextureLoader } from "three";
 
 type GLTFResult = GLTF & {
   nodes: any;
@@ -22,8 +23,9 @@ const ModelCanvas: React.FC<{ projectId: ProjectId; imageId: string }> = ({
   const { currentModel, setCurrentModel } = useModelContext();
   // update based on pathname
   useEffect(() => {
-    setCurrentModel(parseInt(imageId))
-  }, [imageId])
+    setCurrentModel(parseInt(imageId));
+  }, [imageId]);
+  // const texture = useLoader(TextureLoader, "/test.jpg");
 
   return (
     <Canvas className="fixed left-0 top-0 h-screen w-screen">
@@ -37,6 +39,10 @@ const ModelCanvas: React.FC<{ projectId: ProjectId; imageId: string }> = ({
             textureIdx={currentModel}
             scale={[-1, 1, 1]}
           />
+          {/* <mesh scale={[-1, 1, 1]} rotation={[0, Math.PI/2, 0]}>
+            <sphereGeometry args={[5, 32, 32]}   />
+            <meshBasicMaterial map={texture} side={2}  />
+          </mesh> */}
         </Suspense>
         {Object.keys(CONFIG[projectId].arrows).includes(
           currentModel.toString(),
