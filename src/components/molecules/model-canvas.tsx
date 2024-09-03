@@ -10,6 +10,7 @@ import ModelEnv from "../atoms/model-env";
 import { CONFIG, ProjectId } from "@/config/config";
 import { useModelContext } from "@/contexts/model-context";
 import { TextureLoader } from "three";
+import useDeviceDetect from "@/hooks/useDeviceDetect";
 
 type GLTFResult = GLTF & {
   nodes: any;
@@ -21,6 +22,8 @@ const ModelCanvas: React.FC<{ projectId: ProjectId; imageId: string }> = ({
   imageId,
 }) => {
   const { currentModel, setCurrentModel } = useModelContext();
+  const { isMobile } = useDeviceDetect();
+
   // update based on pathname
   useEffect(() => {
     setCurrentModel(parseInt(imageId));
@@ -28,7 +31,13 @@ const ModelCanvas: React.FC<{ projectId: ProjectId; imageId: string }> = ({
   // const texture = useLoader(TextureLoader, "/test.jpg");
 
   return (
-    <Canvas className="fixed left-0 top-0 h-screen w-screen">
+    <Canvas
+      className="fixed left-0 top-0"
+      style={{
+        width: isMobile ? "90vw" : "100vh",
+        height: isMobile ? "70vh" : "100vh",
+      }}
+    >
       <Suspense fallback={null}>
         <ambientLight intensity={1} />
         <directionalLight position={[5, 5, 5]} />

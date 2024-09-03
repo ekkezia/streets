@@ -3,12 +3,16 @@
 import { ProjectId } from "@/config/config";
 import { CONFIG } from "@/config/config";
 import { useModelContext } from "@/contexts/model-context";
+import { Html } from "@react-three/drei";
 import React, { useState } from "react";
 
 // current model starts from 1
 const Arrow: React.FC<
-  { onClick: () => void } & JSX.IntrinsicElements["mesh"]
-> = ({ onClick, ...meshProps }) => {
+  {
+    onClick: () => void;
+    tooltip: string;
+  } & JSX.IntrinsicElements["mesh"]
+> = ({ onClick, tooltip, ...meshProps }) => {
   const [hovered, setHovered] = useState(false);
 
   return (
@@ -29,6 +33,24 @@ const Arrow: React.FC<
         <boxGeometry args={[1, 0.2, 0.2]} />
         <meshStandardMaterial color={hovered ? "pink" : "white"} />
       </mesh>
+
+      {/* Tooltip */}
+      {hovered && (
+        <Html position={[0, 0, 0]} style={{ pointerEvents: "auto" }}>
+          <div
+            style={{
+              backgroundColor: "black",
+              color: "white",
+              padding: "5px",
+              borderRadius: "4px",
+              fontSize: "12px",
+              textAlign: "center",
+            }}
+          >
+            {tooltip}
+          </div>
+        </Html>
+      )}
     </mesh>
   );
 };
@@ -74,12 +96,29 @@ export const Move: React.FC<{
     history.pushState({}, "", (currentModel + value).toString());
   };
 
-  if (currentModel !== 0 || currentModel === CONFIG[projectId].numberOfImages - 1) {
+  const getTooltip = () => {
+    switch (direction) {
+      case "up":
+        return "Reverse";
+      case "down":
+        return "Forward";
+      case "left":
+        return "Left";
+      case "right":
+        return "Right";
+    }
+  };
+
+  if (
+    currentModel !== 0 ||
+    currentModel === CONFIG[projectId].numberOfImages - 1
+  ) {
     return (
       <Arrow
         onClick={handleMove}
         position={POSITION[direction].position}
         rotation={POSITION[direction].rotation}
+        tooltip={getTooltip()}
       />
     );
   }
