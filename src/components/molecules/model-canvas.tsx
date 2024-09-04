@@ -36,6 +36,7 @@ const ModelCanvas: React.FC<{ projectId: ProjectId; imageId: string }> = ({
       style={{
         width: isMobile ? "90vw" : "100vh",
         height: isMobile ? "70vh" : "100vh",
+        transform: isMobile ? "translateY(32px)" : "translateY(0px)"
       }}
     >
       <Suspense fallback={null}>
