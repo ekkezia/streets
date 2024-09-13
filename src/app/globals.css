@@ -30,4 +30,10 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+
+  .h-screen {
+    height: 100vh; /* fallback for Opera, IE and etc. */
+    height: 100dvh;
+  }
+
 }
