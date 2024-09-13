@@ -35,7 +35,7 @@ const ModelCanvas: React.FC<{ projectId: ProjectId; imageId: string }> = ({
   useEffect(() => {
     const loader = new TextureLoader();
 
-    const loadTexture = (url) => {
+    const loadTexture = (url: string) => {
       // console.log("🏁 Now loading:", url);
       return new Promise<void>((resolve, reject) => {
         loader.load(
