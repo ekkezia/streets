@@ -1,14 +1,20 @@
 "use client";
 
-import React, { Suspense, useEffect, useState } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Text } from "@react-three/drei";
+import { OrbitControls, Text3D } from "@react-three/drei";
 import ModelLoader from "../atoms/model-loader";
-import { FontLoader, GLTF } from "three/examples/jsm/Addons.js";
+import { GLTF } from "three/examples/jsm/Addons.js";
 import { Move } from "../atoms/model-arrow";
 import ModelEnv from "../atoms/model-env";
 import { CONFIG, ProjectId, SUPABASE_URL } from "@/config/config";
-import { TextureLoader } from "three";
+import {
+  BufferGeometry,
+  Material,
+  Mesh,
+  NormalBufferAttributes,
+  TextureLoader,
+} from "three";
 import { usePathname } from "next/navigation";
 
 type GLTFResult = GLTF & {
@@ -47,15 +53,6 @@ const ModelCanvas: React.FC<{
     currentModel: currentModel,
     onMove: setCurrentModel,
   };
-  // const font = useLoader(FontLoader, customFont);
-  // font loader
-  useEffect(() => {
-    const fontLoader = new FontLoader();
-
-    fontLoader.load("/fonts/arial.json", (font) => {
-      console.log("Font loaded:", font);
-    });
-  }, []);
 
   // preload 2 images ahead
   useEffect(() => {
@@ -109,6 +106,11 @@ const ModelCanvas: React.FC<{
     .fill(null)
     .map((_, idx) => getPath(idx + 1));
 
+  const textRef = useRef<Mesh<
+    BufferGeometry<NormalBufferAttributes>,
+    Material | Material[]
+  > | null>(null); // Use null instead of undefined
+
   return (
     <Canvas
       className={className ?? "fixed left-0 top-0 h-screen w-screen"}
@@ -129,21 +131,25 @@ const ModelCanvas: React.FC<{
           />
           {/* Subtitle */}
           {withSubtitle && CONFIG[projectId].text[currentModel] && (
-            <Text
-              scale={[0.2, 0.2, 0.2]}
-              position={[0, -2, 0]}
-              color="white"
-              anchorX="center"
-              anchorY="middle"
-              // font="/fonts/arial.json"
-            >
-              {CONFIG[projectId].text[currentModel]}
-            </Text>
+            <group>
+              {/* Text */}
+              <Text3D
+                ref={textRef}
+                font="/fonts/Arial.json"
+                size={0.15}
+                height={0.005}
+                curveSegments={20}
+                position={[-3, 3, 0]} // Position in 3D space
+              >
+                {CONFIG[projectId].text[currentModel]}
+                <meshStandardMaterial color="black" />{" "}
+              </Text3D>
+            </group>
           )}
         </Suspense>
         {/* Arrows to navigate */}
         {Object.keys(CONFIG[projectId].arrows).includes(
-          currentIndexToPathname,
+          currentModel.toString(),
         ) ? (
           CONFIG[projectId].arrows[currentModel].map(
             ([direction, value], idx) => {
