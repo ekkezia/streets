@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Text3D } from "@react-three/drei";
+import { OrbitControls, Text, Text3D } from "@react-three/drei";
 import ModelLoader from "../atoms/model-loader";
 import { GLTF } from "three/examples/jsm/Addons.js";
 import { Move } from "../atoms/model-arrow";
@@ -133,7 +133,7 @@ const ModelCanvas: React.FC<{
           {withSubtitle && CONFIG[projectId].text[currentModel] && (
             <group>
               {/* Text */}
-              <Text3D
+              {/* <Text3D
                 ref={textRef}
                 font="/fonts/Arial.json"
                 size={0.15}
@@ -143,7 +143,16 @@ const ModelCanvas: React.FC<{
               >
                 {CONFIG[projectId].text[currentModel]}
                 <meshStandardMaterial color="black" />{" "}
-              </Text3D>
+              </Text3D> */}
+
+              <Text
+                // font="/fonts/Arial.json"
+                fontSize={0.2}
+                position={[0, 3.5, 0]} // Position in 3D space
+              >
+                {CONFIG[projectId].text[currentModel]}
+                <meshStandardMaterial color="black" />{" "}
+              </Text>
             </group>
           )}
         </Suspense>
