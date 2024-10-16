@@ -21,7 +21,7 @@ export default async function Page({ params }: { params: { id: string } }) {
         projectId="hkg"
         imageId={params.id}
         className="h-1/2 w-screen items-start justify-center sm:h-screen sm:w-1/2"
-        doubleBy={36}
+        doubleBy={44}
       />
     </main>
   );

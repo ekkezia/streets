@@ -12,7 +12,7 @@ export default function Home() {
         projectId="hkg"
         imageId={"1"}
         className="h-1/2 w-screen items-start justify-center sm:h-screen sm:w-1/2"
-        doubleBy={36}
+        doubleBy={44}
       />
     </main>
   );

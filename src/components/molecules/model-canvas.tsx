@@ -31,21 +31,19 @@ const ModelCanvas: React.FC<{
 }> = ({ projectId, imageId, className, withSubtitle, doubleBy }) => {
   const pathname = usePathname();
   const currentIndexToPathname =
-    pathname.split("/")[pathname.split("/").length - 1];
+    pathname.split("/").length <= 1
+      ? "1"
+      : pathname.split("/")[pathname.split("/").length - 1];
 
   // State management to control the current model, this state is controlled by <Move /> as well
   const [currentModel, setCurrentModel] = useState<number>(
     doubleBy
-      ? doubleBy + parseInt(currentIndexToPathname)
+      ? (doubleBy + parseInt(currentIndexToPathname)) % 44
       : parseInt(currentIndexToPathname),
   );
 
   useEffect(() => {
-    setCurrentModel(
-      doubleBy
-        ? doubleBy + parseInt(currentIndexToPathname)
-        : parseInt(currentIndexToPathname),
-    );
+    setCurrentModel(parseInt(currentIndexToPathname));
   }, [pathname]);
 
   const moveProps = {
@@ -126,7 +124,7 @@ const ModelCanvas: React.FC<{
           <ModelEnv
             rotation={[0, Math.PI / 2, 0]}
             projectId={projectId}
-            textureIdx={currentModel}
+            textureIdx={doubleBy ? doubleBy + currentModel : currentModel}
             scale={[-1, 1, 1]}
           />
           {/* Subtitle */}

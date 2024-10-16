@@ -127,11 +127,15 @@ export const CONFIG: Config = {
   },
 
   hkg: {
-    supabaseFolder: "streets_jkt_290824",
-    supabasePrefixPath: "streets_jkt_290824",
-    numberOfImages: 69,
+    supabaseFolder: "streets_hkg_111024",
+    supabasePrefixPath: "streets_hkg_111024",
+    numberOfImages: 88,
     // image subtitle
     text: {},
-    arrows: {},
+    arrows: {
+      1: [["down", 1]],
+      44: [["up", -1]],
+      88: [["up", -45]],
+    },
   },
 };
