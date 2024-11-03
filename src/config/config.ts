@@ -4,7 +4,7 @@ import { ArrowDirection } from "@/components/atoms/model-arrow";
 export const SUPABASE_URL =
   "https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/";
 
-export type ProjectId = "jkt" | "hkg";
+export type ProjectId = "jakarta" | "hong-kong";
 
 export type DirectionTuple = [ArrowDirection, number];
 
@@ -23,7 +23,7 @@ export type Config = {
 };
 
 export const CONFIG: Config = {
-  jkt: {
+  jakarta: {
     supabaseFolder: "streets_jkt_290824",
     supabasePrefixPath: "streets_jkt_290824",
     numberOfImages: 69,
@@ -126,7 +126,7 @@ export const CONFIG: Config = {
     },
   },
 
-  hkg: {
+  "hong-kong": {
     supabaseFolder: "streets_hkg_111024",
     supabasePrefixPath: "streets_hkg_111024",
     numberOfImages: 88,

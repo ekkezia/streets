@@ -31,7 +31,7 @@ const ModelCanvas: React.FC<{
 }> = ({ projectId, imageId, className, withSubtitle, doubleBy }) => {
   const pathname = usePathname();
   const currentIndexToPathname =
-    pathname.split("/").length <= 1
+    pathname.split("/").length <= 2
       ? "1"
       : pathname.split("/")[pathname.split("/").length - 1];
 

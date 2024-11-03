@@ -95,7 +95,11 @@ export const Move: React.FC<{
   // const { currentModel, setCurrentModel } = useModelContext();
   const handleMove = () => {
     onMove(currentModel + value);
-    history.pushState({}, "", (currentModel + value).toString());
+    history.pushState(
+      {},
+      "",
+      `/${projectId}/${(currentModel + value).toString()}`,
+    );
   };
 
   const getTooltip = () => {
