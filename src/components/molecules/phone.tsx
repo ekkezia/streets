@@ -17,7 +17,7 @@ const Phone = () => {
 
   const chatRef = useRef<HTMLDivElement | null>(null);
 
-  const [notification, setNotification] = useState<number>(0);
+  const [notification, setNotification] = useState<boolean>(true);
 
   const [isChatWindow, setIsChatWindow] = useState<boolean>(true);
 
@@ -25,19 +25,24 @@ const Phone = () => {
 
   const scrollToBottom = () => {
     if (chatRef.current) {
-              console.log('should scroll', chatRef.current.scrollHeight)
+              // console.log('should scroll', chatRef.current.scrollHeight)
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
   };
 
   useEffect(() => {
     scrollToBottom();
-    setNotification((prevNotif) => prevNotif + 1);
   }, [pathname, display, isChatWindow]);
+
+  useEffect(() => {
+    if (!display) {
+      setNotification(true)
+    }
+  }, [display]);
 
   const handleClickButton = () => {
     setDisplay(!display);
-    setNotification(0);
+    setNotification(false);
   };
 
 
@@ -69,9 +74,10 @@ const handleBack = () => {
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           exit={{ scale: 0 }}
-          className={`absolute sm:left-auto left-4 bottom-12 ml-12 h-6 w-6 rounded-full bg-green-300 flex items-center justify-center text-xs`}
+          className={`absolute sm:left-auto left-4 bottom-12 ml-12 h-4 w-4 rounded-full bg-green-300 flex items-center justify-center text-xs`}
         >
-          {notification}
+          {/* {notification} */}
+
         </motion.span>
       )}
 
@@ -110,12 +116,14 @@ const handleBack = () => {
               const isMatch = item.path === parseInt(pathname.split("/")[2]);
 
               const numberOfChatBeforeCurrent = CHAT.filter((item) => item.path < parseInt(pathname.split("/")[2])).length - 1;
-              
+
+              const transitionDelay = parseInt(pathname.split("/")[2]) === 1 ? idx * 0.5 : (idx - numberOfChatBeforeCurrent) * 0.5;
+
               return (
                 <motion.div
                   initial={isMatch ? { scale: 0 } : false}
                   animate={isMatch ? { scale: 1 } : false}
-                  transition={{ duration: 0.1, delay: (idx - numberOfChatBeforeCurrent) * 0.5 }}
+                  transition={{ duration: 0.1, delay: transitionDelay }}
                   className={`${item.role == "seller" ? "justify-start" : "justify-end"} flex items-end`}
                   key={item.idx}
                 >
