@@ -129,13 +129,13 @@ export const CONFIG: Config = {
   "hong-kong": {
     supabaseFolder: "streets_hkg_111024",
     supabasePrefixPath: "streets_hkg_111024",
-    numberOfImages: 88,
+    numberOfImages: 76,
     // image subtitle
     text: {},
     arrows: {
       1: [["down", 1]],
       44: [["up", -1]],
-      88: [["up", -45]],
+      76: [["up", -39]],
     },
   },
 };

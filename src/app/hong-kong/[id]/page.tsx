@@ -24,7 +24,7 @@ export default function Page({ params }: { params: { id: string } }) {
         projectId="hong-kong"
         imageId={params.id}
                 column="1"
-        doubleBy={44}
+        doubleBy={38}
       />
     </main>
   );

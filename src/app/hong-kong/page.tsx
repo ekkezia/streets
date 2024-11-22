@@ -15,7 +15,7 @@ export default function Home() {
           projectId="hong-kong"
           imageId={"1"}
           className="canvas h-[50vh] w-screen items-start justify-center sm:h-screen sm:w-1/2"
-          doubleBy={44}
+          doubleBy={38}
         />
         <Phone />
       </main>
