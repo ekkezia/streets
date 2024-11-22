@@ -27,8 +27,9 @@ const ModelCanvas: React.FC<{
   imageId: string; // this imageId is provided from server. It is unused at the moment
   className?: string; // default: full screen
   withSubtitle?: boolean;
+  column?: '1' | '2';
   doubleBy?: number; // two columns, specify the number of images to be skipped if the canvas is for the 2nd texture on the right column
-}> = ({ projectId, imageId, className, withSubtitle, doubleBy }) => {
+}> = ({ projectId, imageId, className, withSubtitle, column, doubleBy }) => {
   const pathname = usePathname();
   const currentIndexToPathname =
     pathname.split("/").length <= 2
@@ -109,12 +110,41 @@ const ModelCanvas: React.FC<{
     Material | Material[]
   > | null>(null); // Use null instead of undefined
 
+  // Two Columns Style
+  const [isSmallScreen, setIsSmallScreen] = useState(window.innerWidth < 425);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsSmallScreen(window.innerWidth < 425);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const style: Record<string, React.CSSProperties> = {
+    "1": {
+        position: "fixed",
+        width: isSmallScreen ? "100vw" : "50vw",
+        height: isSmallScreen ? "50vh" : "100vh",
+        top: 0,
+        left: isSmallScreen ? 0 : '50vw',
+    },
+    "2": {
+        position: "fixed",
+        width: isSmallScreen ? "100vw" : "50vw",
+        height: isSmallScreen ? "50vh" : "100vh",
+        top: isSmallScreen ? "50vh" : 0,
+        left: 0,
+    }
+  }
+
   return (
     <Canvas
       className={className ?? "fixed left-0 top-0 h-screen w-screen"}
       gl={{
         toneMappingExposure: 4,
       }}
+      style={column && style[column]}
     >
       <Suspense fallback={null}>
         <ambientLight intensity={0.5} />

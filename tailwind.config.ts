@@ -1,3 +1,4 @@
+const plugin = require('tailwindcss/plugin');
 import type { Config } from "tailwindcss";
 
 const config: Config = {
@@ -31,6 +32,37 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    plugin(function({ addComponents }: { addComponents: (components: Record<string, any>) => void }) {
+      const newUtilities = {
+        '.canvas-col-left': {
+          position: 'fixed',
+          width: '100vw',
+          height: '50vh',
+          top: '0',
+          left: '0',
+          '@screen sm': {
+            width: '50vw',
+            height: '100vh',
+          }
+        },
+        '.canvas-col-right': {
+          position: 'fixed',
+          width: '100vw',
+          height: '50vh',
+          top: '50vh',
+          left: '0',
+          '@screen sm': {
+            width: '50vw',
+            height: '100vh',
+            top: 0,
+            left: '50vw'
+          }
+        },
+      };
+
+      addComponents(newUtilities);
+    }),
+  ],
 };
 export default config;

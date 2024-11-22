@@ -9,12 +9,12 @@ export default function Home() {
         <ModelCanvas
           projectId="hong-kong"
           imageId={"1"}
-          className="h-1/2 w-screen items-start justify-center sm:h-screen sm:w-1/2"
+          className="h-[50vh] w-screen items-start justify-center sm:h-screen sm:w-1/2"
         />
         <ModelCanvas
           projectId="hong-kong"
           imageId={"1"}
-          className="h-1/2 w-screen items-start justify-center sm:h-screen sm:w-1/2"
+          className="canvas h-[50vh] w-screen items-start justify-center sm:h-screen sm:w-1/2"
           doubleBy={44}
         />
         <Phone />
