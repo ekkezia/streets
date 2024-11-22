@@ -111,14 +111,15 @@ const ModelCanvas: React.FC<{
   > | null>(null); // Use null instead of undefined
 
   // Two Columns Style
-  const [isSmallScreen, setIsSmallScreen] = useState(window.innerWidth < 425);
+  const [isSmallScreen, setIsSmallScreen] = useState(false);
 
   useEffect(() => {
-    const handleResize = () => {
+    if (typeof window !== "undefined") {
       setIsSmallScreen(window.innerWidth < 425);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+      const handleResize = () => setIsSmallScreen(window.innerWidth < 425);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
   }, []);
 
   const style: Record<string, React.CSSProperties> = {

@@ -107,14 +107,17 @@ const handleBack = () => {
             {CHAT.filter(
               (item) => item.path <= parseInt(pathname.split("/")[2]),
             ).map((item, idx) => {
-              const isMatch = item.path === parseInt(pathname.split("/")[2]); 
+              const isMatch = item.path === parseInt(pathname.split("/")[2]);
+
+              const numberOfChatBeforeCurrent = CHAT.filter((item) => item.path < parseInt(pathname.split("/")[2])).length - 1;
+              
               return (
                 <motion.div
                   initial={isMatch ? { scale: 0 } : false}
                   animate={isMatch ? { scale: 1 } : false}
-                  transition={{ duration: 0.1, delay: idx * 0.2 }}
+                  transition={{ duration: 0.1, delay: (idx - numberOfChatBeforeCurrent) * 0.5 }}
                   className={`${item.role == "seller" ? "justify-start" : "justify-end"} flex items-end`}
-                  key={`${item.message}`}
+                  key={item.idx}
                 >
                   {/* Profile Pic */}
                   {item.role == "buyer" ? (
