@@ -69,7 +69,7 @@ const handleBack = () => {
       </div>
 
       {/* Notification Flag */}
-      {notification > 0 && (
+      {notification && (
         <motion.span
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
