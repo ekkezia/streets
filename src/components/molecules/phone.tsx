@@ -50,6 +50,12 @@ useEffect(() => {
   setTime(getCurrentTime());
 }, [])
 
+useEffect(() => {
+                  const transitionDelay = parseInt(pathname.split("/")[2]) === 1 || pathname.split("/")[2] === undefined;
+console.log('transition delay', transitionDelay)
+  
+}, [pathname])
+
 const handleBack = () => {
   setIsChatWindow(false)
 }
@@ -111,18 +117,31 @@ const handleBack = () => {
             ref={chatRef}
           >
             {CHAT.filter(
-              (item) => item.path <= parseInt(pathname.split("/")[2]),
-            ).map((item, idx) => {
-              const isMatch = item.path === parseInt(pathname.split("/")[2]);
+              (item) => {
+                  if (pathname.split("/")[2]) {
+                    return item.path <= parseInt(pathname.split("/")[2])
+                  } else {
+                    return item.path === 1
+                  }
 
+              },
+            ).map((item, idx) => {
+              const isMatch = () => {
+                if (pathname.split("/")[2]) {
+                  return item.path === parseInt(pathname.split("/")[2]);
+                } else {
+                  return item.path === 1
+                }
+              }
+              
               const numberOfChatBeforeCurrent = CHAT.filter((item) => item.path < parseInt(pathname.split("/")[2])).length - 1;
 
-              const transitionDelay = parseInt(pathname.split("/")[2]) === 1 ? idx * 0.5 : (idx - numberOfChatBeforeCurrent) * 0.5;
+              const transitionDelay = parseInt(pathname.split("/")[2]) === 1 || pathname.split("/")[2] === undefined ? idx * 0.5 : (idx - numberOfChatBeforeCurrent) * 0.5;
 
               return (
                 <motion.div
-                  initial={isMatch ? { scale: 0 } : false}
-                  animate={isMatch ? { scale: 1 } : false}
+                  initial={isMatch() ? { scale: 0 } : false}
+                  animate={isMatch() ? { scale: 1 } : false}
                   transition={{ duration: 0.1, delay: transitionDelay }}
                   className={`${item.role == "seller" ? "justify-start" : "justify-end"} flex items-end`}
                   key={item.idx}
