@@ -1,6 +1,5 @@
 import ModelCanvas from "@/components/molecules/model-canvas";
 import { CONFIG } from "@/config/config";
-import { useEffect, useState } from 'react';
 
 export async function generateStaticParams() {
   const paths = [...Array(CONFIG["hong-kong"].numberOfImages)].map(
@@ -18,12 +17,12 @@ export default function Page({ params }: { params: { id: string } }) {
       <ModelCanvas
         projectId="hong-kong"
         imageId={params.id}
-                column="2"
+        column="2"
       />
       <ModelCanvas
         projectId="hong-kong"
         imageId={params.id}
-                column="1"
+        column="1"
         doubleBy={38}
       />
     </main>

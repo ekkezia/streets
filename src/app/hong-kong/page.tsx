@@ -10,14 +10,15 @@ export default function Home() {
           projectId="hong-kong"
           imageId={"1"}
           className="h-[50vh] w-screen items-start justify-center sm:h-screen sm:w-1/2"
+          column={"1"}
         />
         <ModelCanvas
           projectId="hong-kong"
           imageId={"1"}
           className="canvas h-[50vh] w-screen items-start justify-center sm:h-screen sm:w-1/2"
           doubleBy={38}
+          column={"2"}
         />
-        <Phone />
       </main>
     </CarousellContextProvider>
   );

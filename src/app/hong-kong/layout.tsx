@@ -1,4 +1,4 @@
-import Phone from "@/components/molecules/phone";
+import Phone from '@/components/molecules/phone';
 import { CarousellContextProvider } from "@/contexts/carousell-context";
 
 export default function RootLayout({

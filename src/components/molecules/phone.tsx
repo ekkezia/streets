@@ -6,6 +6,12 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import CHAT from '@/config/hkg-chat-config';
 
+const NOTIFICATION_STATUS = {
+  UNOPENED: 1,
+  OPENED: 2,
+  READ: 3
+}
+
 const getCurrentTime = () => {
   return new Date(Date.now()).toLocaleTimeString();
 };
@@ -17,7 +23,7 @@ const Phone = () => {
 
   const chatRef = useRef<HTMLDivElement | null>(null);
 
-  const [notification, setNotification] = useState<boolean>(true);
+  const [notification, setNotification] = useState<number>(NOTIFICATION_STATUS.UNOPENED);
 
   const [isChatWindow, setIsChatWindow] = useState<boolean>(true);
 
@@ -35,14 +41,16 @@ const Phone = () => {
   }, [pathname, display, isChatWindow]);
 
   useEffect(() => {
-    if (!display) {
-      setNotification(true)
-    }
-  }, [display]);
+    setNotification(NOTIFICATION_STATUS.UNOPENED);
+  }, [pathname]);
 
   const handleClickButton = () => {
     setDisplay(!display);
-    setNotification(false);
+    if (notification === NOTIFICATION_STATUS.OPENED) {
+      setNotification(NOTIFICATION_STATUS.READ);
+    } else {
+      setNotification(NOTIFICATION_STATUS.OPENED);
+    }
   };
 
 
@@ -50,11 +58,11 @@ useEffect(() => {
   setTime(getCurrentTime());
 }, [])
 
-useEffect(() => {
-                  const transitionDelay = parseInt(pathname.split("/")[2]) === 1 || pathname.split("/")[2] === undefined;
-console.log('transition delay', transitionDelay)
+// useEffect(() => {
+//   const transitionDelay = parseInt(pathname.split("/")[2]) === 1 || pathname.split("/")[2] === undefined;
+//   // console.log('transition delay', transitionDelay)
   
-}, [pathname])
+// }, [pathname])
 
 const handleBack = () => {
   setIsChatWindow(false)
@@ -75,17 +83,17 @@ const handleBack = () => {
       </div>
 
       {/* Notification Flag */}
-      {notification && (
+      {
         <motion.span
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           exit={{ scale: 0 }}
-          className={`absolute sm:left-auto left-4 bottom-12 ml-12 h-4 w-4 rounded-full bg-green-300 flex items-center justify-center text-xs`}
+          className={`absolute sm:left-auto left-4 bottom-12 ml-12 h-4 w-4 rounded-full bg-green-300 flex items-center justify-center text-xs ${notification === NOTIFICATION_STATUS.UNOPENED ? 'visible' : 'hidden'}`}
         >
           {/* {notification} */}
 
         </motion.span>
-      )}
+      }
 
       {/* Chat UI */}
       {display && isChatWindow && (
@@ -93,6 +101,7 @@ const handleBack = () => {
         key="chat-ui"
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
+          exit={{ scale: 0 }}
           className="absolute bottom-20 h-[550px] w-[90vw] rounded-xl bg-white sm:w-[360px]"
         >
           {/* Profile */}
@@ -140,7 +149,7 @@ const handleBack = () => {
 
               return (
                 <motion.div
-                  initial={isMatch() ? { scale: 0 } : false}
+                  initial={isMatch() && notification !== NOTIFICATION_STATUS.READ ? { scale: 0 } : false}
                   animate={isMatch() ? { scale: 1 } : false}
                   transition={{ duration: 0.1, delay: transitionDelay }}
                   className={`${item.role == "seller" ? "justify-start" : "justify-end"} flex items-end`}
@@ -160,9 +169,9 @@ const handleBack = () => {
                   <div
                     className={`${item.role == "seller" ? "items-start bg-slate-200 text-slate-600" : "items-end bg-blue-900 text-white"} bg-blue flex w-fit flex-col gap-2 rounded-xl p-2`}
                   >
-                    <p className="text-[14px]">
+                    <div className="text-[14px]">
                       {item.message}
-                    </p>
+                    </div>
                     {item.img && (
                       <img
                         src={item.img}
@@ -171,7 +180,7 @@ const handleBack = () => {
                       />
                     )}
                     <p className="text-[10px]">
-                      <span>16:00</span>
+                      {/* <span>16:00</span> */}
                       {item.role == "buyer" && (
                         <span className="text-blue-400">&nbsp;✓</span>
                       )}

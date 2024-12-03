@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Text, Text3D } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import ModelLoader from "../atoms/model-loader";
 import { GLTF } from "three/examples/jsm/Addons.js";
 import { Move } from "../atoms/model-arrow";
@@ -16,6 +16,7 @@ import {
   TextureLoader,
 } from "three";
 import { usePathname } from "next/navigation";
+import SubtitleText from './subtitle-text';
 
 type GLTFResult = GLTF & {
   nodes: any;
@@ -130,7 +131,7 @@ const ModelCanvas: React.FC<{
         top: 0,
         left: isSmallScreen ? 0 : '50vw',
     },
-    "2": {
+  "2": {
         position: "fixed",
         width: isSmallScreen ? "100vw" : "50vw",
         height: isSmallScreen ? "50vh" : "100vh",
@@ -141,11 +142,10 @@ const ModelCanvas: React.FC<{
 
   return (
     <Canvas
-      className={className ?? "fixed left-0 top-0 h-screen w-screen"}
+      style={column && style[column]}
       gl={{
         toneMappingExposure: 4,
       }}
-      style={column && style[column]}
     >
       <Suspense fallback={null}>
         <ambientLight intensity={0.5} />
@@ -160,29 +160,9 @@ const ModelCanvas: React.FC<{
           />
           {/* Subtitle */}
           {withSubtitle && CONFIG[projectId].text[currentModel] && (
-            <group>
-              {/* Text */}
-              {/* <Text3D
-                ref={textRef}
-                font="/fonts/Arial.json"
-                size={0.15}
-                height={0.005}
-                curveSegments={20}
-                position={[-3, 3, 0]} // Position in 3D space
-              >
-                {CONFIG[projectId].text[currentModel]}
-                <meshStandardMaterial color="black" />{" "}
-              </Text3D> */}
-
-              <Text
-                // font="/fonts/Arial.json"
-                fontSize={0.2}
-                position={[0, 3.5, 0]} // Position in 3D space
-              >
-                {CONFIG[projectId].text[currentModel]}
-                <meshStandardMaterial color="black" />{" "}
-              </Text>
-            </group>
+            <SubtitleText>                
+              {CONFIG[projectId].text[currentModel]}
+            </SubtitleText>
           )}
         </Suspense>
         {/* Arrows to navigate */}
