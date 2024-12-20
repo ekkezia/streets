@@ -185,8 +185,18 @@ const ModelCanvas: React.FC<{
         ) : (
           // Default Arrows
           <>
-            <Move direction={"reverse"} value={-1} {...moveProps} />
-            <Move direction={"forward"} value={1} {...moveProps} />
+            <Move 
+              direction={"reverse"} 
+              value={-1}                   
+              tooltip={null}
+              {...moveProps} 
+            />
+            <Move 
+              direction={"forward"} 
+              value={1}                   
+              tooltip={null}
+              {...moveProps} 
+            />
           </>
         )}
         <OrbitControls maxDistance={5} />
