@@ -59,7 +59,7 @@ const Arrow: React.FC<
 // down: +1
 // left: +1
 // right: +1
-export type ArrowDirection = "up" | "down" | "left" | "right";
+export type ArrowDirection = "reverse" | "forward" | "left" | "right" | "up" | "down";
 type Position = {
   [key: string]: {
     position: any;
@@ -67,31 +67,43 @@ type Position = {
   };
 };
 const POSITION: Position = {
-  up: {
-    position: [0, -2, -1],
+    // TODO: change to forward n reverse
+  reverse: {
+    position: [0, -1.5, -1],
     rotation: [0, 0, 0],
   },
-  down: {
-    position: [0, -2, 1.8],
+  forward: {
+    position: [0, -1.5, 1.8],
     rotation: [Math.PI, 0, 0],
   },
   left: {
-    position: [-1, -2, 0.5],
+    position: [-1.5, -1.5, 0.5],
     rotation: [0, Math.PI / 2, 0],
   },
   right: {
-    position: [1, -2, 0.5],
+    position: [1.5, -1.5, 0.5],
     rotation: [0, -Math.PI / 2, 0],
   },
+  // TODO: change to up n down
+  up: {
+    position: [0, -2, -1],
+    rotation: [Math.PI/2, 0, 0],
+  },
+  down: {
+    position: [0, -2.5, 1],
+    rotation: [-Math.PI/2, 0, 0],
+  },
+
 };
 
 export const Move: React.FC<{
   projectId: ProjectId;
   direction: ArrowDirection;
+  tooltip: string | null;
   value: number;
   currentModel: number;
   onMove: (id: number) => void;
-}> = ({ projectId, direction = "up", value, currentModel, onMove }) => {
+}> = ({ projectId, direction = "reverse", value, tooltip = null, currentModel, onMove }) => {
   // const { currentModel, setCurrentModel } = useModelContext();
   const handleMove = () => {
     onMove(currentModel + value);
@@ -103,16 +115,24 @@ export const Move: React.FC<{
   };
 
   const getTooltip = () => {
+    if (tooltip === null) {
+    // default tooltip
     switch (direction) {
-      case "up":
+      case "reverse":
         return "Reverse";
-      case "down":
+      case "forward":
         return "Forward";
       case "left":
         return "Left";
       case "right":
         return "Right";
+      case "up":
+        return "reverse";
+      case "down":
+        return "forward";
     }
+
+    } else return tooltip
   };
 
   if (

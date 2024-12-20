@@ -170,11 +170,12 @@ const ModelCanvas: React.FC<{
           currentModel.toString(),
         ) ? (
           CONFIG[projectId].arrows[currentModel].map(
-            ([direction, value], idx) => {
+            ([direction, value, tooltip], idx) => {
               return (
                 <Move
                   direction={direction}
                   value={value}
+                  tooltip={tooltip}
                   {...moveProps}
                   key={idx}
                 />
@@ -184,8 +185,8 @@ const ModelCanvas: React.FC<{
         ) : (
           // Default Arrows
           <>
-            <Move direction={"up"} value={-1} {...moveProps} />
-            <Move direction={"down"} value={1} {...moveProps} />
+            <Move direction={"reverse"} value={-1} {...moveProps} />
+            <Move direction={"forward"} value={1} {...moveProps} />
           </>
         )}
         <OrbitControls maxDistance={5} />

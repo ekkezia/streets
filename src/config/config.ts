@@ -4,9 +4,9 @@ import { ArrowDirection } from "@/components/atoms/model-arrow";
 export const SUPABASE_URL =
   "https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/";
 
-export type ProjectId = "jakarta" | "hong-kong";
+export type ProjectId = "jakarta" | "hong-kong" | "singapore";
 
-export type DirectionTuple = [ArrowDirection, number];
+export type DirectionTuple = [ArrowDirection, number, string | null];
 
 export type Config = {
   [key: string]: {
@@ -82,47 +82,47 @@ export const CONFIG: Config = {
       69: "[ELENA & INARAH] Dadaah Lapangan Banteng!",
     },
     arrows: {
-      1: [["down", 1]],
+      1: [["forward", 1, null]],
       4: [
-        ["left", 38],
-        ["right", 1],
-        ["up", -1],
+        ["left", 38, null],
+        ["right", 1, null],
+        ["reverse", -1, null],
       ],
       7: [
-        ["right", 1],
-        ["up", -1],
+        ["right", 1, null],
+        ["reverse", -1, null],
       ],
       8: [
-        ["left", -1],
-        ["down", 1],
+        ["left", -1, null],
+        ["forward", 1, null],
       ],
       10: [
-        ["left", -1],
-        ["down", 1],
+        ["left", -1, null],
+        ["forward", 1, null],
       ],
       12: [
-        ["left", -1],
-        ["up", 1],
+        ["left", -1, null],
+        ["reverse", 1, null],
       ],
       42: [
-        ["up", -38],
-        ["down", 1],
+        ["reverse", -38, null],
+        ["forward", 1, null],
       ],
       // 48: [["left",  -1], ["right", 1]],
       49: [
-        ["right", -1],
-        ["down", 1],
+        ["right", -1, null],
+        ["forward", 1, null],
       ],
       51: [
-        ["right", 1],
-        ["up", -1],
+        ["right", 1, null],
+        ["reverse", -1, null],
       ],
       59: [
-        ["left", 1],
-        ["up", -1],
+        ["left", 1, null],
+        ["reverse", -1, null],
       ],
-      41: [["up", -1]],
-      69: [["up", -1]],
+      41: [["reverse", -1, null]],
+      69: [["reverse", -1, null]],
     },
   },
 
@@ -133,9 +133,37 @@ export const CONFIG: Config = {
     // image subtitle
     text: {},
     arrows: {
-      1: [["down", 1]],
-      44: [["up", -1]],
-      76: [["up", -39]],
+      1: [["forward", 1, null]],
+      44: [["reverse", -1, null]],
+      76: [["reverse", -39, null]],
     },
   },
+
+    "singapore": {
+    supabaseFolder: "streets_sg_161224",
+    supabasePrefixPath: "streets_sg_161224",
+    numberOfImages: 76,
+    // image subtitle
+    text: {},
+    arrows: {
+      1: [["up", 1, null]],
+      2: [["up", 1, null]],
+      3: [["forward", 1, null], ["down", -1, null]],
+      7: [["forward", 4, null], ["reverse", -1, null]],
+      11: [["forward", 1, null], ["reverse", -7, null]],
+      13: [["right", -1, null], ["left", 1, null]],
+      14: [["right", 6, "die"], ["left", -1, "back"], ["forward", 1, "run"]],
+      15: [["right", 1, null], ["left", -1, null]],
+      16: [["right", 1, null], ["left", -1, null]],
+      17: [["right", 1, null], ["left", -1, null]],
+      18: [["right", 1, null], ["left", -1, null]],
+      19: [["right", -18, null], ["left", -1, null]],
+      20: [["left", 1, null], ["right", -6, null]],
+      21: [["reverse", 1, null], ["forward", -1, null]],
+      22: [["reverse", 1, null], ["forward", -1, null]],
+      23: [["right", -1, null]],
+
+    },
+  },
+
 };

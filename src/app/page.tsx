@@ -14,6 +14,10 @@ export default function Home() {
         <Link href="/jakarta">
           <h3 className="h3 hover:text-gray-300 bg-gray-500 rounded-sm px-2 text-white min-w-[100px] text-center text-nowrap">Jakarta</h3>
         </Link>
+                <Link href="/singapore">
+          <h3 className="h3 hover:text-gray-300 bg-gray-500 rounded-sm px-2 text-white min-w-[100px] text-center text-nowrap">Singapore</h3>
+        </Link>
+
 
           <h3 className="h3 hover:text-gray-300 bg-gray-500 rounded-sm px-2 text-white min-w-[100px] text-center text-nowrap"></h3>
           <h3 className="h3 hover:text-gray-300 bg-gray-500 rounded-sm px-2 text-white min-w-[100px] text-center text-nowrap"></h3>
