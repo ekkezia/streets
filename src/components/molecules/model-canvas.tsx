@@ -30,7 +30,8 @@ const ModelCanvas: React.FC<{
   withSubtitle?: boolean;
   column?: '1' | '2';
   doubleBy?: number; // two columns, specify the number of images to be skipped if the canvas is for the 2nd texture on the right column
-}> = ({ projectId, imageId, className, withSubtitle, column, doubleBy }) => {
+  scale?: number[]
+}> = ({ projectId, imageId, className, withSubtitle, column, doubleBy, scale }) => {
   const pathname = usePathname();
   const currentIndexToPathname =
     pathname.split("/").length <= 2
@@ -156,7 +157,7 @@ const ModelCanvas: React.FC<{
             rotation={[0, Math.PI / 2, 0]}
             projectId={projectId}
             textureIdx={doubleBy ? doubleBy + currentModel : currentModel}
-            scale={[-1, 1, 1]}
+            scale={scale ?? [-1, 1, 1]}
           />
           {/* Subtitle */}
           {withSubtitle && CONFIG[projectId].text[currentModel] && (

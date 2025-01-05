@@ -213,7 +213,7 @@ const handleBack = () => {
             id="listi-container"
             style={{ height: 550 - 60 - 76.5 }}
           >
-            <img src="/images/4.JPG" alt="carousell-banner" className="aspect-square w-full" />
+            <img src="/images/shawl.JPG" alt="carousell-banner" className="aspect-square w-full" />
 
             <b className="text-gray-700 text-sm">Girly Shawl for the Best Girl in the World</b>
             <b className="text-gray-900 text-xl">HK$1000</b>
