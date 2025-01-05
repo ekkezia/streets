@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import {  Text3D } from "@react-three/drei";
+import { usePathname } from 'next/navigation';
 
 const SubtitleText: React.FC<{
   children: string;
@@ -10,6 +11,8 @@ const SubtitleText: React.FC<{
   const textRef = useRef<THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>>(null);
   const [textWidth, setTextWidth] = useState(0);
   const [textHeight, setTextHeight] = useState(0);
+
+  const path = usePathname()
 
   useEffect(() => {
     if (textRef.current) {
@@ -19,7 +22,9 @@ const SubtitleText: React.FC<{
       setTextWidth(width);
       setTextHeight(height);
     }
-  }, [textRef]);
+          console.log('path', path)
+
+  }, [textRef, path]);
 
 
   return (
