@@ -10,8 +10,10 @@ export type DirectionTuple = [ArrowDirection, number, string | null];
 
 export type Config = {
   [key: string]: {
+    title: string;
     information: string;
     credits: string[][];
+    locationInfo: string[];
     location: {
       [key: string]: {
         latitude: number | undefined;
@@ -53,12 +55,15 @@ export const languageLabels = Object.values(languageOption).map(option => option
 
 export const CONFIG: Config = {
   jakarta: {
+    title: 'Jakarta',
     information: "Join Inarah as she takes you on her journey in Jakarta. You will witness outcomes that mirror or contradict each other, depending on the route that you take: Pasar Baru or Lapangan Banteng (or both!). Depending on your choices, the protagonist may encounter robbery or cross paths with a benign snack vendor. These diverging narratives highlight how small decisions can lead to vastly different destinies.",
-    credits: [["Inarah Syarafina", "Protagonist"], ["Elena Natanael", "Stylist, Friend"], ["Bimo Deviantoputra", "Pickpocket, Meatball Vendor"], ["Farid Renais", "Photographer"]],
+    credits: [["Inarah Syarafina", "Protagonist", "inarah.syarafina"], ["Elena Natanael", "Creative, Friend", "elena.natanael"], ["Bimo Deviantoputra", "Pickpocket, Meatball Vendor", "bimodvnt"], ["Farid Renais", "Photographer", "farid.renais"]],
     languageOptions: ["id", "en"],
     supabaseFolder: "streets_jkt_290824",
     supabasePrefixPath: "streets_jkt_290824",
     numberOfImages: 69,
+    // location info
+    locationInfo: ['Pasar Baru', 'Lapangan Banteng', 'Gedung Kesenian Jakarta'],
     // location
     location: {
       1: {
@@ -312,8 +317,11 @@ export const CONFIG: Config = {
   },
 
   "hong-kong": {
+    title: 'Hong Kong',
         information: "Join Inarah as she takes you on her journey in Jakarta. You will witness outcomes that mirror or contradict each other, depending on the route that you take: Pasar Baru or Lapangan Banteng (or both!). Depending on your choices, the protagonist may encounter robbery or cross paths with a benign snack vendor. These diverging narratives highlight how small decisions can lead to vastly different destinies.",
-            credits: [["Angela Liu", "Carousell Seller"], ["Kim", "Carousell Buyer"]],
+            credits: [["Angela Liu", "Carousell Seller", "angelaliuuu"], ["Kim", "Carousell Buyer", "shut_up_and_dance"]],
+                locationInfo: ['Temple Street'],
+
         languageOptions: ["en"],
             location: {
       1: {
@@ -335,15 +343,16 @@ export const CONFIG: Config = {
   },
 
     "singapore": {
+      title: 'Singapore',
           information: "Inarah takes you on a parallel journey in Jakarta.",
           languageOptions: ["en"],
-          credits: [["Ariel Sjarifuddin", "Fighter"], ["Elizabeth Kezia", "Enemy"]],
-
-              location: {
-      1: {
-        latitude: -6.1663530,
-        longitude: 106.8346330
-      }
+          credits: [["Ariel Sjarifuddin", "Fighter", "healthycalculus"], ["Elizabeth Kezia", "Enemy", "ekezia"]],
+      locationInfo: ['Serangoon'],
+      location: {
+        1: {
+          latitude: -6.1663530,
+          longitude: 106.8346330
+        }
     },
 
     supabaseFolder: "streets_sg_161224",
@@ -373,11 +382,13 @@ export const CONFIG: Config = {
   },
 
       "cambodia": {
+        title: 'Cambodia',
       information: "Inarah takes you on a parallel journey in Jakarta.",
             languageOptions: ["en"],
-            credits: [["Claudia Park", "Mockumentary Reporter"], ["Elizabeth Kezia", "Cameraman"]],
+            credits: [["Claudia Park", "Mockumentary Reporter", "parkladizharbo"], ["Elizabeth Kezia", "Cameraman", "ekezia"]],
+      locationInfo: ['Kampot', 'Phnom Penh', 'Koh Rong'],
 
-                location: {
+      location: {
       1: {
         latitude: -6.1663530,
         longitude: 106.8346330

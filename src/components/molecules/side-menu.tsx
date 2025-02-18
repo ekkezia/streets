@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Dropdown from '../atoms/dropdown';
 import { CONFIG, languageOption, ProjectId } from '@/config/config';
 import { useLanguageContext } from '@/contexts/language-context';
+import Link from 'next/link';
 
 const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
   const [isOpen, setIsOpen] = useState(false)
@@ -22,34 +23,43 @@ const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
   return(
     <div className={`absolute z-[999] top-0 eft-0 ${isOpen ? 'left-0' : 'left-[-300px]'} flex items-center transition-all duration-200`}>
     <div className="max-w-[300px] bg-white p-4 h-screen max-h-screen overflow-y-scroll shadow-xl pb-16">
-        <h1 className=" text-bold text-black">
+        <h1 className="font-bold text-blue-500 text-2xl">
+          {CONFIG[projectId].title}
+        </h1>
+        <div className="text-sm pb-4 text-black">
+          {CONFIG[projectId].locationInfo.map((item, idx) => {
+            return (<div key={idx}>{item}</div>)
+          })}
+        </div>
+
+        <h1 className=" font-bold text-gray-400">
           Information
         </h1>
         <div className="text-sm pb-4 text-black">
           {CONFIG[projectId].information}
         </div>
-        <h1 className=" text-bold text-black">
+        <h1 className=" font-bold text-gray-400">
           Credits
         </h1>
         <div className="text-black text-sm pb-4">
           {
             CONFIG[projectId].credits.map((credit, idx) => {
-              return <div key={idx}><div className="text-black">{credit[0]}</div> <div className="text-gray-400">{credit[1]}</div></div>
+              return <Link href={`https://instagram.com/${credit[2]}`} target="_blank" key={idx}><div className="text-blue-500">{credit[0]}</div> <div className="text-gray-400">{credit[1]}</div></Link>
             })
           }
         </div>
 
-<h1 className=" text-bold text-black">
+<h1 className=" font-bold text-gray-400">
           Instructions
         </h1>
         <div className="text-sm pb-4 text-black">
           Look around with your mouse.
         </div>
 
-        <h1 className=" text-bold text-black">
+        <h1 className=" font-bold text-gray-400">
           About
         </h1>
-        <div className="text-black text-sm">
+        <div className="text-black text-sm pb-4">
           <b>Streets</b> repurposes the familiar interface of Google Street View to explore narrative storytelling and subvert its original function of spatial navigation. This project transforms an internet tool for mapping and exploration into a medium for constructing layered, location-based narratives. By leveraging the intuitive arrows and panoramic visuals of Street View, the work invites users to navigate not physical spaces but the branching paths of fictional stories.
 
           The project includes countries that <a href="https://instagram.com/ekezia" target="_blank" className="text-blue-500">Kezia</a> has visited before.
@@ -57,9 +67,12 @@ const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
 
         
 
-        <h1 className="text-bold text-black">
+        <h1 className="font-bold text-gray-400">
           Language      
         </h1>
+        <div className="text-sm text-black">
+          Change the language for the subtitle of the story.
+        </div>
         <Dropdown options={languageLabels} onSelect={handleSelect} />
       </div>
 
