@@ -49,11 +49,13 @@ const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
           }
         </div>
 
-<h1 className=" font-bold text-gray-400">
+        <h1 className=" font-bold text-gray-400">
           Instructions
         </h1>
         <div className="text-sm pb-4 text-black">
-          Look around with your mouse.
+          <div>Explore the 360 world with your mouse.</div>
+          <div>You may proceed with the story by clicking on the arrow.</div>
+          <div>On the bottom right, there&apos;s a map that informs the location of the protagonist in the real world. On the top right, there&apos;s information on the current latitude and longitude of the position. </div>
         </div>
 
         <h1 className=" font-bold text-gray-400">
