@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Dropdown from '../atoms/dropdown';
 import { CONFIG, languageOption, ProjectId } from '@/config/config';
 import { useLanguageContext } from '@/contexts/language-context';
@@ -20,34 +20,58 @@ const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
   const languageLabels = CONFIG[projectId].languageOptions.map((opt) => languageOption[opt].label);
 
   return(
-    <div className={`absolute z-[999] top-0 eft-0 ${isOpen ? 'left-0' : 'left-[-240px]'} flex items-center transition-all duration-200`}>
-      <div className="max-w-[240px] bg-white p-4 h-screen">
-        <div className=" text-bold">
+    <div className={`absolute z-[999] top-0 eft-0 ${isOpen ? 'left-0' : 'left-[-300px]'} flex items-center transition-all duration-200`}>
+    <div className="max-w-[300px] bg-white p-4 h-screen max-h-screen overflow-y-scroll shadow-xl pb-16">
+        <h1 className=" text-bold text-black">
           Information
-        </div>
-        <div className="text-sm pb-4">
+        </h1>
+        <div className="text-sm pb-4 text-black">
           {CONFIG[projectId].information}
         </div>
-        <div className=" text-bold">
-          Instruction
-        </div>
-        <div className="text-sm pb-4">
-          Look around with your mouse
+        <h1 className=" text-bold text-black">
+          Credits
+        </h1>
+        <div className="text-black text-sm pb-4">
+          {
+            CONFIG[projectId].credits.map((credit, idx) => {
+              return <div key={idx}><div className="text-black">{credit[0]}</div> <div className="text-gray-400">{credit[1]}</div></div>
+            })
+          }
         </div>
 
-        <div className=" text-bold">
-          Language      
+<h1 className=" text-bold text-black">
+          Instructions
+        </h1>
+        <div className="text-sm pb-4 text-black">
+          Look around with your mouse.
         </div>
+
+        <h1 className=" text-bold text-black">
+          About
+        </h1>
+        <div className="text-black text-sm">
+          <b>Streets</b> repurposes the familiar interface of Google Street View to explore narrative storytelling and subvert its original function of spatial navigation. This project transforms an internet tool for mapping and exploration into a medium for constructing layered, location-based narratives. By leveraging the intuitive arrows and panoramic visuals of Street View, the work invites users to navigate not physical spaces but the branching paths of fictional stories.
+
+          The project includes countries that <a href="https://instagram.com/ekezia" target="_blank" className="text-blue-500">Kezia</a> has visited before.
+        </div>
+
+        
+
+        <h1 className="text-bold text-black">
+          Language      
+        </h1>
         <Dropdown options={languageLabels} onSelect={handleSelect} />
       </div>
 
-      <div className="bg-white rounded-r h-fit w-fit p-2 cursor-pointer"
+      <div className="bg-white rounded-r h-fit w-fit py-4 pl-2 cursor-pointer"
         onClick={() => {
             setIsOpen(!isOpen)          
           }}
         >
-        <div className={`${isOpen ? 'rotate-180' : 'rotate-0'} animation-all`}>
-          ➡️
+        <div className={`${isOpen ? 'rotate-180' : 'rotate-0'} transform origin-center flex justify-center items-center animation-all text-gray-400`}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="20" height="20">
+            <polygon points="5,7 15,15 5,23" fill="currentColor" />
+          </svg>
         </div>
 
       </div>

@@ -1,3 +1,4 @@
+import LocationMap from '@/components/atoms/location-map';
 import SideMenu from '@/components/molecules/side-menu';
 
 export default function RootLayout({
@@ -8,6 +9,7 @@ export default function RootLayout({
   return (
       <main className="flex w-full items-center justify-center">
         <SideMenu projectId='jakarta' />
+        <LocationMap projectId='jakarta' />
         {children}
       </main>
   );

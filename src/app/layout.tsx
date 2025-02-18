@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Open_Sans } from "next/font/google";
 import "./globals.css";
 import { ModelContextProvider } from '@/contexts/model-context';
 import { LanguageContextProvider } from '@/contexts/language-context';
+import { LocationContextProvider } from '@/contexts/location-context';
 
-const inter = Inter({ subsets: ["latin"] });
+const openSans = Open_Sans({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Streets 📍 @ekezia",
@@ -18,10 +19,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className={openSans.className}>
         <ModelContextProvider>
           <LanguageContextProvider>
-            {children}
+            <LocationContextProvider>
+              {children}
+            </LocationContextProvider>
           </LanguageContextProvider>
         </ModelContextProvider>
       </body>

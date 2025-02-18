@@ -23,14 +23,14 @@ const Arrow: React.FC<
       {...meshProps}
     >
       {/* Arrow up */}
-      <mesh position={[-0.3, 0, 0]} rotation={[0, Math.PI / 4, 0]}>
-        <boxGeometry args={[1, 0.2, 0.2]} />
+      <mesh position={[-0.25, 0, 0]} rotation={[0, Math.PI / 4, 0]}>
+        <boxGeometry args={[1, 0, 0.3]} />
         <meshStandardMaterial color={hovered ? "pink" : "white"} />
       </mesh>
 
       {/* Arrow down */}
-      <mesh position={[0.3, 0, 0]} rotation={[0, -Math.PI / 4, 0]}>
-        <boxGeometry args={[1, 0.2, 0.2]} />
+      <mesh position={[0.25, 0, 0]} rotation={[0, -Math.PI / 4, 0]}>
+        <boxGeometry args={[1, 0, 0.3]} />
         <meshStandardMaterial color={hovered ? "pink" : "white"} />
       </mesh>
 

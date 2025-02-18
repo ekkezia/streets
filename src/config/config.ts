@@ -11,6 +11,13 @@ export type DirectionTuple = [ArrowDirection, number, string | null];
 export type Config = {
   [key: string]: {
     information: string;
+    credits: string[][];
+    location: {
+      [key: string]: {
+        latitude: number | undefined;
+        longitude: number | undefined;
+      };
+    }
     languageOptions: TLanguage[]
     supabaseFolder: string;
     supabasePrefixPath: string;
@@ -46,11 +53,19 @@ export const languageLabels = Object.values(languageOption).map(option => option
 
 export const CONFIG: Config = {
   jakarta: {
-    information: "Inarah takes you on a parallel journey in Jakarta.",
+    information: "Join Inarah as she takes you on her journey in Jakarta. You will witness outcomes that mirror or contradict each other, depending on the route that you take: Pasar Baru or Lapangan Banteng (or both!). Depending on your choices, the protagonist may encounter robbery or cross paths with a benign snack vendor. These diverging narratives highlight how small decisions can lead to vastly different destinies.",
+    credits: [["Inarah Syarafina", "Protagonist"], ["Elena Natanael", "Stylist, Friend"], ["Bimo Deviantoputra", "Pickpocket, Meatball Vendor"], ["Farid Renais", "Photographer"]],
     languageOptions: ["id", "en"],
     supabaseFolder: "streets_jkt_290824",
     supabasePrefixPath: "streets_jkt_290824",
     numberOfImages: 69,
+    // location
+    location: {
+      1: {
+        latitude: -6.1663530,
+        longitude: 106.8346330
+      }
+    },
     // image subtitle
     text: {
       1: { 
@@ -297,8 +312,16 @@ export const CONFIG: Config = {
   },
 
   "hong-kong": {
-        information: "Inarah takes you on a parallel journey in Jakarta.",
+        information: "Join Inarah as she takes you on her journey in Jakarta. You will witness outcomes that mirror or contradict each other, depending on the route that you take: Pasar Baru or Lapangan Banteng (or both!). Depending on your choices, the protagonist may encounter robbery or cross paths with a benign snack vendor. These diverging narratives highlight how small decisions can lead to vastly different destinies.",
+            credits: [["Angela Liu", "Carousell Seller"], ["Kim", "Carousell Buyer"]],
         languageOptions: ["en"],
+            location: {
+      1: {
+        latitude: -6.1663530,
+        longitude: 106.8346330
+      }
+    },
+
     supabaseFolder: "streets_hkg_111024",
     supabasePrefixPath: "streets_hkg_111024",
     numberOfImages: 76,
@@ -314,6 +337,15 @@ export const CONFIG: Config = {
     "singapore": {
           information: "Inarah takes you on a parallel journey in Jakarta.",
           languageOptions: ["en"],
+          credits: [["Ariel Sjarifuddin", "Fighter"], ["Elizabeth Kezia", "Enemy"]],
+
+              location: {
+      1: {
+        latitude: -6.1663530,
+        longitude: 106.8346330
+      }
+    },
+
     supabaseFolder: "streets_sg_161224",
     supabasePrefixPath: "streets_sg_161224",
     numberOfImages: 76,
@@ -341,8 +373,17 @@ export const CONFIG: Config = {
   },
 
       "cambodia": {
-            information: "Inarah takes you on a parallel journey in Jakarta.",
+      information: "Inarah takes you on a parallel journey in Jakarta.",
             languageOptions: ["en"],
+            credits: [["Claudia Park", "Mockumentary Reporter"], ["Elizabeth Kezia", "Cameraman"]],
+
+                location: {
+      1: {
+        latitude: -6.1663530,
+        longitude: 106.8346330
+      }
+    },
+
     supabaseFolder: "streets_kh",
     supabasePrefixPath: "streets_kh",
     numberOfImages: 104,

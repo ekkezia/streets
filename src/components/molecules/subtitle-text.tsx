@@ -34,7 +34,7 @@ const SubtitleText: React.FC<{
 
   return (
             <group>
-              <mesh position={[0, 2.6, -0.1]} scale={[textWidth + 0.6, textHeight + 0.2, 0.1]}>
+              <mesh position={[0, 2.6, -0.001]} scale={[textWidth + 0.6, textHeight + 0.2, 0]}>
                 <boxGeometry />
                 <meshStandardMaterial color="lightgray" />
               </mesh>
@@ -42,7 +42,7 @@ const SubtitleText: React.FC<{
               <Text3D
                 font="/fonts/arial.json"
                 size={0.15}
-                height={0.02}
+                height={0.0}
                 position={[-textWidth / 2, 2.5, 0]} 
                 ref={textRef}
               >

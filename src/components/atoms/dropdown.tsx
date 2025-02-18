@@ -32,14 +32,14 @@ const Dropdown: React.FC<DropdownProps> = ({ options, onSelect }) => {
   return (
     <div className="relative w-48" ref={dropdownRef}>
       <button
-        className="w-full px-4 py-2 text-left bg-white border rounded-lg shadow-sm focus:outline-none text-sm"
+        className="w-full px-4 py-2 text-left bg-white border rounded-lg shadow-sm focus:outline-none text-sm text-black"
         onClick={() => setIsOpen(!isOpen)}
       >
         {selected || "Select an option"}
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 w-full mt-2 bg-white border rounded-lg shadow-lg">
+        <div className="absolute left-0 w-full mt-2 bg-white border rounded-lg shadow-lg text-black">
           {options.map((option, idx) => (
             <div
               key={idx}

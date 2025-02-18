@@ -4,7 +4,7 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <main className="fixed left-0 top-0 flex h-screen w-screen flex-col justify-center">
+    <main className="fixed left-0 top-0 flex h-screen w-screen flex-col justify-center">      
       <div className="w-full rounded-none bg-gray-200 px-4 py-12 flex gap-8 overflow-x-scroll no-scrollbar">
         <Link href="/hong-kong">
           <h3 className="h3 hover:text-gray-300 bg-gray-500 rounded-sm px-2 text-white min-w-[100px] text-center text-nowrap">Hong Kong</h3>

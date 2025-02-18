@@ -5,7 +5,7 @@ const ModelLoader: React.FC = () => {
   const { progress } = useProgress();
   return (
     <Html center className="w-screen text-center">
-      🏃‍♀️ {progress}% {Array.from({ length: progress }, () => "💨")}
+      🏃‍♀️ {progress}% {Array.from({ length: progress % 10 }, () => "💨")}
     </Html>
   );
 };
