@@ -10,11 +10,16 @@ export type DirectionTuple = [ArrowDirection, number, string | null];
 
 export type Config = {
   [key: string]: {
+    information: string;
+    languageOptions: TLanguage[]
     supabaseFolder: string;
     supabasePrefixPath: string;
     numberOfImages: number;
     text: {
-      [key: number]: string;
+      [key: number]: {
+        id: string;
+        en: string;
+      };
     };
     arrows: {
       [key: number]: DirectionTuple[];
@@ -22,64 +27,229 @@ export type Config = {
   };
 };
 
+export type TLanguage = "id" | "en";
+
+export const languageOption = 
+  {
+    id: {
+    label: "Bahasa Indonesia",
+    value: "id"
+  }, 
+  en: {
+    label: "English",
+    value: "en"
+  }
+};
+
+export const languageLabels = Object.values(languageOption).map(option => option.label);
+
+
 export const CONFIG: Config = {
   jakarta: {
+    information: "Inarah takes you on a parallel journey in Jakarta.",
+    languageOptions: ["id", "en"],
     supabaseFolder: "streets_jkt_290824",
     supabasePrefixPath: "streets_jkt_290824",
     numberOfImages: 69,
     // image subtitle
     text: {
-      1: "[INARAH] Gimana ya cara keliling Jakarta Pusat?",
-      4: "[INARAH] Belok kanan, atau kiri?",
-      5: "[INARAH] Kalo ke kanan sih arah ke Pasar Baru.",
-      6: "[INARAH] Duh.. panas banget!",
-      7: "[INARAH] Eh yaelah, kenapa gak naik busway aja ya?",
-      8: "[INARAH] Perlu seberang kalo mau ke Pasar Baru.",
-      9: "[INARAH] Permisi..",
-      13: "[INARAH] Akhirnya sampe di Pasar Baru.",
-      14: "[INARAH] Belanja ukulele ah..",
-      16: "[INARAH] Dapet angklung juga hehe..",
-      20: "[INARAH] Ups keseleo..",
-      22: "[INARAH] Asyik dapet sepatu baru Bata!",
-      23: "[INARAH] Langsung ganti ya sepatunya..",
-      24: "[ANAK-ANAK] Itu lagi foto apa tu kakaknya?",
-      25: "[SUARA TAPAK KAKI COPET]",
-      26: "[SUARA TAPAK KAKI COPET MENDEKAT]",
-      27: "[SUARA TAPAK KAKI COPET SEMAKIN KERAS]",
-      28: "[INARAH] Eh.. [SUARA COPET MENARIK TAS KERTAS]",
-      29: "[INARAH] COPET!!! ADA COPET!!!",
-      30: "[INARAH] EH COPET JANGAN KABUR!!",
-      31: "[INARAH] Woy.. larinya cepet amat COPET!",
-      32: "[INARAH] Aduh.. barang gue yang baru dibeli..",
-      33: "[INARAH TERENGAH-ENGAH]",
-      34: "[SUARA TANGISAN INARAH]",
-      35: "[INARAH] Loh? Elena? [ELENA] Loh? Inarah?",
-      36: "[ELENA] Beb ada apa? [INARAH] Aku baru kecopetan..",
-      37: "[ELENA] Udah gapapa..",
-      38: "[FOTOGRAFER] 1, 2, 3, Cheese..",
-      39: "[ELENA & INARAH] Ih mau tasnya..",
-      41: "[ELENA & INARAH] Dadaah Pasar Baru!",
+      1: { 
+        id: "[INARAH] Gimana ya cara keliling Jakarta Pusat?",
+        en: "[INARAH] How do I go about in Central Jakarta?"
+      },
+      4: {
+        id: "[INARAH] Belok kanan, atau kiri?",
+        en: "[INARAH] Turn right, or left?",
+      },
+      5: {
+        id: "[INARAH] Kalo ke kanan sih arah ke Pasar Baru.",
+        en: "[INARAH] If I go right, it will lead to Pasar Baru."
+      },
+      6: {
+        id: "[INARAH] Duh.. panas banget!",
+        en: "[INARAH] Damn it's hot out here!"
+      },
+      7: {
+        id: "[INARAH] Eh yaelah, kenapa gak naik busway aja ya?",
+        en: "[INARAH] Oh man why didn't I take busway?"
+      },
+      8: {
+        id: "[INARAH] Perlu seberang kalo mau ke Pasar Baru.",
+        en: "[INARAH] Need to cross if wanna go to Pasar Baru."
+      },
+      9: { id: "[INARAH] Permisi..", en: "[INARAH] Excuse me..."},
+      13: {
+        id: "[INARAH] Akhirnya sampe di Pasar Baru.",
+        en: "[INARAH] I finally arrived at Pasar Baru."
+      },
+      14: {
+        id: "[INARAH] Belanja ukulele ah..",
+        en: "[INARAH] Let's shop for an ukulele.."
+      },
+      16: {
+        id: "[INARAH] Dapet angklung juga hehe..",
+        en: "[INARAH] Got an angklung too hehe.."
+      },
+      20: {
+        id: "[INARAH] Ups keseleo..",
+        en: "[INARAH] Whoopsie sprained my foot.."
+      },
+      22: {
+        id: "[INARAH] Asyik dapet sepatu baru Bata!",
+        en: "[INARAH] Hooray I got new Bata shoes!"
+      },
+      23: {
+        id: "[INARAH] Langsung ganti ya sepatunya..",
+        en: "[INARAH] Let me change my shoes real quick.."
+      },
+      24: {
+        id: "[ANAK-ANAK] Itu lagi foto apa tu kakaknya?",
+        en: "[CHILDREN] What is she up to?"
+      },
+      25: {
+        id: "[TAPAK KAKI COPET]",
+        en: "[PICKPOCKET'S FOOTSTEP]"
+      },
+      26: {id: "[TAPAK KAKI COPET MENDEKAT]",
+        en: "[PICKPOCKET'S FOOTSTEP GETTING CLOSER]"
+      },
+      27: {
+        id: "[TAPAK KAKI COPET SEMAKIN KERAS]",
+        en: "[PICKPOCKET'S FOOTSTEP GETTING LOUDER]"
+      },
+      28: {
+        id: "[INARAH] Eh.. [COPET MENARIK TAS KERTAS]",
+        en: "[INARAH] Eh.. [SOUND OF PICKPOCKET TAKING THE PAPER BAG]"
+      },
+      29: {
+        id: "[INARAH] COPET!!! ADA COPET!!!",
+        en: "[INARAH] PICKPOCKET!!! THERE'S A PICKPOCKET!!!"
+      },
+      30: {
+        id: "[INARAH] EH COPET JANGAN KABUR!!",
+        en: "[INARAH] YO MR. PICKPOCKET YOU'RE NOT GETTING AWAY FROM ME!!"
+      },
+      31: {
+        id: "[INARAH] Woy.. larinya cepet amat COPET!",
+        en: "[INARAH] He be running fast!"
+      },
+      32: {
+        id: "[INARAH] Aduh.. barang gue yang baru dibeli..",
+        en: "[INARAH] Oh no.. but I just bought the stuff though.."
+      },
+      33: {
+        id: "[INARAH TERENGAH-ENGAH]",
+        en: "[INARAH CATCHING HER BREATH]"
+      },
+      34: {
+        id: "[TANGISAN INARAH]",
+        en: "[INARAH CRYING]"
+      },
+      35: {
+        id: "[INARAH] Loh? Elena? [ELENA] Loh? Inarah?",
+        en: "[INARAH] Elena? [ELENA] Inarah?"
+      },
+      36: {
+        id: "[ELENA] Beb ada apa? [INARAH] Aku baru kecopetan..",
+        en: "[ELENA] Babe what happened? [INARAH] I just got pickpocketted.."
+      },
+      37: {
+        id: "[ELENA] Udah gapapa..",
+        en: "[ELENA] It's alright.."
+      },
+      38: {
+        id: "[FOTOGRAFER] 1, 2, 3, Cheese..",
+        en: "[PHOTOGRAPHER] 1, 2, 3, Cheese.."
+      },
+      39: {
+        id: "[ELENA & INARAH] Ih mau tasnya..",
+        en: "[ELENA & INARAH] OMG the bag is so IT.."
+      },
+      41: {
+        id: "[ELENA & INARAH] Dadaah Pasar Baru!",
+        en: "[ELENA & INARAH] Bye Pasar Baru!"
+      },
 
-      42: "[INARAH] Kalo ke kiri sih arah ke Lapangan Banteng.",
-      43: "[SUARA KAKEK MENDENGKUR]",
-      44: "[TUKANG BAKSO] Makasih mbak, ini baksonya!",
-      47: "[SUARA KONSTRUKSI JALAN]",
-      48: "[INARAH] Capek ah, duduk dulu.",
-      49: "[INARAH] Perlu seberang kalo mau ke Lapangan Banteng.",
-      50: "[INARAH] Permisi...",
-      53: "[SUARA PIRING & MANGKOK]",
-      56: "[INARAH] Lapangan Banteng di kanan!",
-      58: "[INARAH] Dikit lagi nyampe.",
-      60: "[INARAH] Akhirnya sampe di Lapangan Banteng.",
-      61: "[INARAH] Eh? Siapa tu?",
-      62: "[INARAH] ELENA! [ELENA] INARAH!",
-      63: "[SUARA TAPAK KAKI ELENA & INARAH]",
-      64: "[SUARA TAPAK KAKI ELENA & INARAH]",
-      65: "[ELENA] Apa kabar beb?",
-      66: "[INARAH] Pelukan dulu!",
-      67: "[ELENA] Kang foto, boleh tolong fotoin?",
-      68: "[FOTOGRAFER] 1, 2, 3, Cheese...",
-      69: "[ELENA & INARAH] Dadaah Lapangan Banteng!",
+      42: {
+        id: "[INARAH] Kalo ke kiri sih arah ke Lapangan Banteng.",
+        en: "[INARAH] If I go left, it will lead to Lapangan Banteng."
+      },
+      43: { 
+        id: "[KAKEK MENDENGKUR]",
+        en: "[OLD MAN SNORING] "
+      },
+      44: {
+        id: "[TUKANG BAKSO] Makasih mbak, ini baksonya!",
+        en: "[MEATBALL SELLER] Thanks sister, this is your meal!"
+      },
+      47: {
+        id: "[SUARA BISING KONSTRUKSI JALAN]",
+        en: "[ROAD CONSTRUCTIO NOISE]"
+      },
+      48: {
+        id: "[INARAH] Capek ah, duduk dulu.",
+        en: "[INARAH] So tired, let's seat down."
+      },
+      49: {
+        id: "[INARAH] Perlu seberang kalo mau ke Lapangan Banteng.",
+        en: "[INARAH] Need to cross if wanna go to Lapangan Banteng."
+      },
+      50: {
+        id: "[INARAH] Permisi...",
+        en: "[INARAH] Excuse me..."
+      },
+      53: {
+        id: "[SUARA PIRING & MANGKOK]",
+        en: "[SOUND OF PLATES & BOWLS]"
+      },
+      56: {
+        id: "[INARAH] Lapangan Banteng di kanan!",
+        en: "[INARAH] Lapangan Benteng is on the right!"
+      },
+      58: {
+        id: "[INARAH] Dikit lagi nyampe.",
+        en: "[INARAH] Nearly there."
+      },
+      60: {
+        id: "[INARAH] Akhirnya sampe di Lapangan Banteng.",
+        en: "[INARAH] I finally arrived at Lapangan Banteng."
+      },
+      61: {
+        id: "[INARAH] Eh? Siapa tu?",
+        en: "[INARAH] Oh? Who's that?"
+      },
+      62: {
+        id: "[INARAH] ELENA! [ELENA] INARAH!",
+        en: "[INARAH] ELENA! [ELENA] INARAH!"
+      },
+      63: {
+        id: "[SUARA TAPAK KAKI ELENA & INARAH]",
+        en: "[SOUND OF ELENA & INARAH's FOOTSTEPS]"
+      },
+      64: {
+        id: "[SUARA TAPAK KAKI ELENA & INARAH]",
+        en: "[SOUND OF ELENA & INARAH's FOOTSTEPS]"
+      },
+      65: {
+        id: "[ELENA] Apa kabar beb?",
+        en: "[ELENA] How are you babe?"
+      },
+      66: {
+        id: "[INARAH] Pelukan dulu!",
+        en: "[INARAH] Let's hug first!"
+      },
+      67: {
+        id: "[ELENA] Kang foto, boleh tolong fotoin?",
+        en: "[ELENA] Hi Mister, can you take a picture of us?"
+      },
+      68: {
+        id: "[FOTOGRAFER] 1, 2, 3, Cheese..",
+        en: "[PHOTOGRAPHER] 1, 2, 3, Cheese.."
+      },
+      69: {
+        id: "[ELENA & INARAH] Dadaah Lapangan Banteng!",
+        en: "[ELENA & INARAH] Bye Lapangan Banteng!"
+      },
     },
     arrows: {
       1: [["forward", 1, null]],
@@ -127,6 +297,8 @@ export const CONFIG: Config = {
   },
 
   "hong-kong": {
+        information: "Inarah takes you on a parallel journey in Jakarta.",
+        languageOptions: ["en"],
     supabaseFolder: "streets_hkg_111024",
     supabasePrefixPath: "streets_hkg_111024",
     numberOfImages: 76,
@@ -140,6 +312,8 @@ export const CONFIG: Config = {
   },
 
     "singapore": {
+          information: "Inarah takes you on a parallel journey in Jakarta.",
+          languageOptions: ["en"],
     supabaseFolder: "streets_sg_161224",
     supabasePrefixPath: "streets_sg_161224",
     numberOfImages: 76,
@@ -167,6 +341,8 @@ export const CONFIG: Config = {
   },
 
       "cambodia": {
+            information: "Inarah takes you on a parallel journey in Jakarta.",
+            languageOptions: ["en"],
     supabaseFolder: "streets_kh",
     supabasePrefixPath: "streets_kh",
     numberOfImages: 104,

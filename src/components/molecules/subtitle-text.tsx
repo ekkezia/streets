@@ -4,10 +4,15 @@ import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import {  Text3D } from "@react-three/drei";
 import { usePathname } from 'next/navigation';
+import { useLanguageContext } from '@/contexts/language-context';
 
 const SubtitleText: React.FC<{
-  children: string;
+  children: {
+    [key: string]: string;
+  };
 }> = ({ children }) => {
+  const { currentLanguage } = useLanguageContext();
+
   const textRef = useRef<THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>>(null);
   const [textWidth, setTextWidth] = useState(0);
   const [textHeight, setTextHeight] = useState(0);
@@ -22,9 +27,9 @@ const SubtitleText: React.FC<{
       setTextWidth(width);
       setTextHeight(height);
     }
-          console.log('path', path)
+          // console.log('path', children["en"])
 
-  }, [textRef, path]);
+  }, [textRef, path, currentLanguage]);
 
 
   return (
@@ -41,7 +46,7 @@ const SubtitleText: React.FC<{
                 position={[-textWidth / 2, 2.5, 0]} 
                 ref={textRef}
               >
-                {children}
+                {currentLanguage ? children[currentLanguage] : children["en"]}
                 <meshStandardMaterial color="black" />
               </Text3D>
             </group>
