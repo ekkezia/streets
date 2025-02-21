@@ -20,13 +20,14 @@ const LocationMap: React.FC<{
   const pathname = usePathname();
 
   useEffect(() => {
-    if (pathname.split('/')[2]) {
-      if(CONFIG[projectId].location[pathname.split('/')[2]]) {
-        setPosition(CONFIG[projectId].location[pathname.split('/')[2]])
-      }
-    } else {
-      setPosition(CONFIG[projectId].location["1"])
-    }
+  const location = CONFIG[projectId].location;
+  const keyFromPath = parseInt(pathname.split('/')[2]);
+  const keys = Object.keys(location).map(Number);
+
+  const nearestKey = Math.max(...keys.filter(k => k <= keyFromPath), 1);
+
+  console.log("Nearest Key:", nearestKey, "Position:");
+    setPosition(CONFIG[projectId].location[nearestKey]);
   }, [pathname])
 
   return (
@@ -34,7 +35,7 @@ const LocationMap: React.FC<{
     <div className="fixed text-xs right-2 top-2 text-white z-[998] bg-gray-900/60 px-1 shadow-sm border-2 border-white rounded-md"
     >
       📍 [{position.latitude}°, {position.longitude}°]
-      </div>
+    </div>
     <Map
       initialViewState={{
         latitude: position.latitude,

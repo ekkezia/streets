@@ -69,7 +69,27 @@ export const CONFIG: Config = {
       1: {
         latitude: -6.1663530,
         longitude: 106.8346330
-      }
+      },
+      5: {
+        latitude: -6.1661,
+        longitude: 106.8348
+      },
+      12: {
+        latitude: -6.1672,
+        longitude: 106.8341
+      },
+      41: {
+        latitude: -6.1614,
+        longitude: 106.8327
+      },
+      48: {
+        latitude: -6.1679, 
+        longitude: 106.8351
+      },
+      60: {
+        latitude: -6.170,
+        longitude: 106.8350,
+      } 
     },
     // image subtitle
     text: {
@@ -204,7 +224,7 @@ export const CONFIG: Config = {
       },
       47: {
         id: "[SUARA BISING KONSTRUKSI JALAN]",
-        en: "[ROAD CONSTRUCTIO NOISE]"
+        en: "[ROAD CONSTRUCTION NOISE]"
       },
       48: {
         id: "[INARAH] Capek ah, duduk dulu.",
@@ -312,7 +332,8 @@ export const CONFIG: Config = {
         ["reverse", -1, null],
       ],
       41: [["reverse", -1, null]],
-      69: [["reverse", -1, null]],
+      68: [["forward", -1, "Reverse"], ["reverse", 1, "Forward"]],
+      69: [["forward", -1, "Reverse"]],
     },
   },
 
@@ -327,7 +348,7 @@ export const CONFIG: Config = {
       1: {
         latitude: -6.1663530,
         longitude: 106.8346330
-      }
+      },
     },
 
     supabaseFolder: "streets_hkg_111024",

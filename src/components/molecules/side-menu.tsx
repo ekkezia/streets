@@ -83,7 +83,7 @@ const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
             setIsOpen(!isOpen)          
           }}
         >
-        <div className={`${isOpen ? 'rotate-180' : 'rotate-0'} transform origin-center flex justify-center items-center animation-all text-gray-400`}>
+        <div className={`${isOpen ? 'rotate-180 translate-x-[-10px]' : 'rotate-0'} transform origin-center flex justify-center items-center animation-all text-gray-400`}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="20" height="20">
             <polygon points="5,7 15,15 5,23" fill="currentColor" />
           </svg>
