@@ -2,12 +2,9 @@
 
 import { CONFIG, ProjectId } from '@/config/config';
 import { useLocationContext } from '@/contexts/location-context';
-import dynamic from "next/dynamic";
 import { usePathname } from 'next/navigation';
+import Map from 'react-map-gl/maplibre';
 import { useEffect } from 'react';
-
-const Map = dynamic(() => import('react-map-gl/maplibre'), { ssr: false });
-// const Marker = dynamic(() => import('react-map-gl/maplibre'), { ssr: false });
 
 const LocationMap: React.FC<{
   zoom?: number;

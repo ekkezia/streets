@@ -106,11 +106,12 @@ export const Move: React.FC<{
 }> = ({ projectId, direction = "reverse", value, tooltip = null, currentModel, onMove }) => {
   // const { currentModel, setCurrentModel } = useModelContext();
   const handleMove = () => {
+    const search = window.location.search ?? "";
     onMove(currentModel + value);
     history.pushState(
       {},
       "",
-      `/${projectId}/${(currentModel + value).toString()}`,
+      `/${projectId}/${(currentModel + value).toString()}${search}`,
     );
   };
 
