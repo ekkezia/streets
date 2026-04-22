@@ -224,9 +224,6 @@ const LocationMap: React.FC<{
       <div className="fixed right-2 top-2 z-[998] rounded-md border-2 border-white bg-gray-900/60 px-2 py-1 text-[11px] text-white shadow-sm">
         📍 [{formatCoordinate(activeLatitude)}°, {formatCoordinate(activeLongitude)}°]
       </div>
-      <div className="fixed bottom-[176px] right-2 z-[1100] rounded-md bg-black/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
-        Hover a dot for lat/lon
-      </div>
       <Map
         mapLib={maplibregl}
         latitude={mapViewState.latitude}
