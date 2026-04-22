@@ -2,8 +2,8 @@
 
 import { ProjectId } from "@/config/config";
 import { CONFIG } from "@/config/config";
-import { useModelContext } from "@/contexts/model-context";
 import { Html } from "@react-three/drei";
+import { useRouter } from "next/navigation";
 import React, { useState } from "react";
 
 // current model starts from 1
@@ -105,14 +105,11 @@ export const Move: React.FC<{
   onMove: (id: number) => void;
 }> = ({ projectId, direction = "reverse", value, tooltip = null, currentModel, onMove }) => {
   // const { currentModel, setCurrentModel } = useModelContext();
+  const router = useRouter();
   const handleMove = () => {
     const search = window.location.search ?? "";
     onMove(currentModel + value);
-    history.pushState(
-      {},
-      "",
-      `/${projectId}/${(currentModel + value).toString()}${search}`,
-    );
+    router.push(`/${projectId}/${(currentModel + value).toString()}${search}`);
   };
 
   const getTooltip = () => {

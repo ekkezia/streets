@@ -18,7 +18,7 @@ export type OrbRotationSnapshot = {
 
 export const DEFAULT_GLASS_ORB_SETTINGS: GlassOrbSettings = {
   radius: 1.35,
-  yaw: 0,
+  yaw: 1.7,
   xRotation: 0.1,
 };
 

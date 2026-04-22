@@ -1,6 +1,13 @@
 "use client";
 
-import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import ModelLoader from "../atoms/model-loader";
@@ -27,9 +34,10 @@ import {
   TextureLoader,
   VideoTexture,
 } from "three";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import SubtitleText from "./subtitle-text";
 import { useLanguageContext } from "@/contexts/language-context";
+import useRestrictedUiAccess from "@/hooks/useRestrictedUiAccess";
 
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg"];
 const ORB_ROTATION_SEND_INTERVAL_MS = 66;
@@ -39,6 +47,65 @@ const stripQueryAndHash = (url: string) => url.split("#")[0].split("?")[0];
 const isVideoMediaUrl = (url: string) => {
   const normalizedUrl = stripQueryAndHash(url).toLowerCase();
   return VIDEO_EXTENSIONS.some((extension) => normalizedUrl.endsWith(extension));
+};
+
+const parseRotationOffsetToRadians = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized.length) {
+      return null;
+    }
+
+    if (normalized.endsWith("deg")) {
+      const numericPart = Number.parseFloat(normalized.slice(0, -3).trim());
+      if (!Number.isFinite(numericPart)) {
+        return null;
+      }
+
+      return (numericPart * Math.PI) / 180;
+    }
+
+    if (normalized.endsWith("rad")) {
+      const numericPart = Number.parseFloat(normalized.slice(0, -3).trim());
+      return Number.isFinite(numericPart) ? numericPart : null;
+    }
+
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const getLocalAssetFallbackPath = (mediaUrl: string) => {
+  if (!mediaUrl || mediaUrl.startsWith("data:") || mediaUrl.startsWith("blob:")) {
+    return null;
+  }
+
+  try {
+    const supabasePublicPath = new URL(SUPABASE_URL).pathname.replace(/\/+$/, "");
+    const mediaPath = new URL(mediaUrl, "http://localhost").pathname;
+    const normalizedMediaPath = mediaPath.replace(/\/+$/, "");
+
+    if (!normalizedMediaPath.startsWith(`${supabasePublicPath}/`)) {
+      return null;
+    }
+
+    const relativePath = normalizedMediaPath.slice(supabasePublicPath.length + 1);
+    if (!relativePath.length) {
+      return null;
+    }
+
+    console.log('Media URL failed to load, falling back to local asset if available:', `assets/${relativePath}`);
+
+    return `/assets/${relativePath}`;
+  } catch {
+    return null;
+  }
 };
 
 const getMediaPath = (projectId: ProjectId, textureIdx: number) => {
@@ -70,16 +137,40 @@ const useActiveMediaTexture = (mediaUrl: string) => {
     let disposed = false;
     let localVideoElement: HTMLVideoElement | null = null;
     let localTexture: Texture | null = null;
+    const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
 
     if (isVideoMediaUrl(mediaUrl)) {
       const videoElement = document.createElement("video");
-      videoElement.src = mediaUrl;
       videoElement.crossOrigin = "anonymous";
       videoElement.loop = true;
       videoElement.muted = true;
       videoElement.autoplay = true;
       videoElement.playsInline = true;
       videoElement.preload = "auto";
+      let hasAttemptedFallback = false;
+
+      const setVideoSource = (nextSource: string) => {
+        videoElement.src = nextSource;
+        videoElement.load();
+        videoElement.play().catch(() => {
+          // Ignore autoplay blocking; the texture will animate once playback starts.
+        });
+      };
+
+      const handleVideoError = () => {
+        if (disposed) {
+          return;
+        }
+
+        if (!hasAttemptedFallback && fallbackMediaUrl && videoElement.src !== fallbackMediaUrl) {
+          hasAttemptedFallback = true;
+          setVideoSource(fallbackMediaUrl);
+          return;
+        }
+
+        setActiveTexture(null);
+      };
+      videoElement.addEventListener("error", handleVideoError);
 
       const videoTexture = new VideoTexture(videoElement);
       videoTexture.colorSpace = SRGBColorSpace;
@@ -90,29 +181,41 @@ const useActiveMediaTexture = (mediaUrl: string) => {
       localVideoElement = videoElement;
       localTexture = videoTexture;
       setActiveTexture(videoTexture);
-      videoElement.play().catch(() => {
-        // Ignore autoplay blocking; the texture will animate once playback starts.
-      });
+      setVideoSource(mediaUrl);
     } else {
       const loader = new TextureLoader();
-      loader.load(
-        mediaUrl,
-        (texture) => {
-          if (disposed) {
-            texture.dispose();
-            return;
-          }
-          texture.colorSpace = SRGBColorSpace;
-          localTexture = texture;
-          setActiveTexture(texture);
-        },
-        undefined,
-        () => {
-          if (!disposed) {
+      let hasAttemptedFallback = false;
+
+      const loadTexture = (source: string) => {
+        loader.load(
+          source,
+          (texture) => {
+            if (disposed) {
+              texture.dispose();
+              return;
+            }
+            texture.colorSpace = SRGBColorSpace;
+            localTexture = texture;
+            setActiveTexture(texture);
+          },
+          undefined,
+          () => {
+            if (disposed) {
+              return;
+            }
+
+            if (!hasAttemptedFallback && fallbackMediaUrl && source !== fallbackMediaUrl) {
+              hasAttemptedFallback = true;
+              loadTexture(fallbackMediaUrl);
+              return;
+            }
+
             setActiveTexture(null);
-          }
-        },
-      );
+          },
+        );
+      };
+
+      loadTexture(mediaUrl);
     }
 
     return () => {
@@ -510,6 +613,23 @@ const EquirectangularView: React.FC<{
   currentMoves: DirectionTuple[];
   onMove: (value: number) => void;
 }> = ({ mediaUrl, isVideo, currentMoves, onMove }) => {
+  const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
+  const [resolvedMediaUrl, setResolvedMediaUrl] = useState(mediaUrl);
+
+  useEffect(() => {
+    setResolvedMediaUrl(mediaUrl);
+  }, [mediaUrl]);
+
+  const handleMediaError = useCallback(() => {
+    if (!fallbackMediaUrl) {
+      return;
+    }
+
+    setResolvedMediaUrl((current) =>
+      current === fallbackMediaUrl ? current : fallbackMediaUrl,
+    );
+  }, [fallbackMediaUrl]);
+
   return (
     <>
       <div className="fixed inset-0 flex items-center justify-center bg-black">
@@ -520,13 +640,15 @@ const EquirectangularView: React.FC<{
             loop
             muted
             playsInline
-            src={mediaUrl}
+            src={resolvedMediaUrl}
+            onError={handleMediaError}
           />
         ) : (
           <img
             alt="Equirectangular panorama"
             className="h-full w-full object-contain"
-            src={mediaUrl}
+            onError={handleMediaError}
+            src={resolvedMediaUrl}
           />
         )}
       </div>
@@ -567,6 +689,7 @@ const ProjectScene: React.FC<{
   listenerMode: boolean;
   remoteOrbRotation: OrbRotationSnapshot | null;
   onOrbRotationChange: (rotation: OrbRotationSnapshot) => void;
+  sphereDefaultRotationOffset: number;
 }> = ({
   projectId,
   currentModel,
@@ -584,6 +707,7 @@ const ProjectScene: React.FC<{
   listenerMode,
   remoteOrbRotation,
   onOrbRotationChange,
+  sphereDefaultRotationOffset,
 }) => {
   const textureIndex = (doubleBy ? doubleBy + currentModel : currentModel) - 1;
   const activeMediaUrl =
@@ -627,7 +751,7 @@ const ProjectScene: React.FC<{
       ) : (
         <>
           <ModelEnv
-            rotation={[0, Math.PI / 2, 0]}
+            rotation={[0, Math.PI / 2 + sphereDefaultRotationOffset, 0]}
             texture={activeTexture}
             scale={scale ?? [-1, 1, 1]}
           />
@@ -684,6 +808,8 @@ const ModelCanvas: React.FC<{
   scale?: [x: number, y: number, z: number]
 }> = ({ projectId, imageId, className, withSubtitle, column, doubleBy, scale }) => {
   const pathname = usePathname();
+  const router = useRouter();
+  const isRestrictedUiAllowed = useRestrictedUiAccess();
   const [viewMode, setViewMode] = useState<
     "sphere" | "orb" | "orb3d" | "equirect"
   >(
@@ -751,15 +877,18 @@ const ModelCanvas: React.FC<{
 
     const params = new URLSearchParams(window.location.search);
     const view = params.get("view");
-    if (view === "orb" || view === "orb3d" || view === "equirect") {
+    if (
+      isRestrictedUiAllowed &&
+      (view === "orb" || view === "orb3d" || view === "equirect")
+    ) {
       setViewMode(view);
       return;
     }
     setViewMode("sphere");
-  }, [pathname]);
+  }, [isRestrictedUiAllowed, pathname]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !isRestrictedUiAllowed) {
       return;
     }
 
@@ -816,7 +945,7 @@ const ModelCanvas: React.FC<{
     return () => {
       window.removeEventListener("keydown", handleFullscreenToggle);
     };
-  }, []);
+  }, [isRestrictedUiAllowed]);
 
   const moveProps = {
     projectId: projectId,
@@ -920,10 +1049,49 @@ const ModelCanvas: React.FC<{
   const isOrb3DMode = viewMode === "orb3d";
   const isOrbLikeMode = isOrbMode || isOrb3DMode;
   const isEquirectMode = viewMode === "equirect";
-  const showOrbUi = isOrbLikeMode && !doubleBy;
-  const showEquirectUi = isEquirectMode && !doubleBy;
+  const showOrbUi = isRestrictedUiAllowed && isOrbLikeMode && !doubleBy;
+  const showEquirectUi = isRestrictedUiAllowed && isEquirectMode && !doubleBy;
   const shouldHideSecondaryOrbCanvas =
-    (isOrbLikeMode || isEquirectMode) && typeof doubleBy === "number";
+    isRestrictedUiAllowed &&
+    (isOrbLikeMode || isEquirectMode) &&
+    typeof doubleBy === "number";
+  const sphereDefaultRotationOffset = useMemo(() => {
+    const projectConfig = CONFIG[projectId];
+    const locationByKey = projectConfig.location;
+    const numericLocationKeys = Object.keys(locationByKey)
+      .map((key) => Number.parseInt(key, 10))
+      .filter((key) => Number.isFinite(key))
+      .sort((a, b) => a - b);
+
+    if (!numericLocationKeys.length) {
+      return 0;
+    }
+
+    const candidateKeys = numericLocationKeys.filter((key) => key <= currentModel);
+    const fallbackKeys = candidateKeys.length ? candidateKeys : numericLocationKeys;
+
+    const locationKeyWithOffset = [...fallbackKeys]
+      .reverse()
+      .find((key) => {
+        const rawOffset = locationByKey[key]?.defaultRotationOffset;
+        return parseRotationOffsetToRadians(rawOffset) !== null;
+      });
+
+    if (typeof locationKeyWithOffset === "number") {
+      const parsedLocationOffset = parseRotationOffsetToRadians(
+        locationByKey[locationKeyWithOffset]?.defaultRotationOffset,
+      );
+
+      if (parsedLocationOffset !== null) {
+        return parsedLocationOffset;
+      }
+    }
+
+    const parsedProjectOffset = parseRotationOffsetToRadians(
+      projectConfig.defaultRotationOffset,
+    );
+    return parsedProjectOffset ?? 0;
+  }, [currentModel, projectId]);
 
   useEffect(() => {
     if (!showOrbUi || typeof window === "undefined") {
@@ -1153,7 +1321,7 @@ const ModelCanvas: React.FC<{
     }
 
     const search = window.location.search ?? "";
-    history.pushState({}, "", `/${projectId}/${nextModel.toString()}${search}`);
+    router.push(`/${projectId}/${nextModel.toString()}${search}`);
   };
 
   useEffect(() => {
@@ -1301,6 +1469,7 @@ const ModelCanvas: React.FC<{
             listenerMode={listenerMode}
             remoteOrbRotation={remoteOrbRotation}
             onOrbRotationChange={handleOrbRotationChange}
+            sphereDefaultRotationOffset={sphereDefaultRotationOffset}
           />
         </Suspense>
       </Canvas>

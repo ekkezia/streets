@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
-import { Open_Sans } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { ModelContextProvider } from '@/contexts/model-context';
 import { LanguageContextProvider } from '@/contexts/language-context';
 import { LocationContextProvider } from '@/contexts/location-context';
 
-const openSans = Open_Sans({ subsets: ["latin"] });
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-plus-jakarta-sans",
+});
 
 export const metadata: Metadata = {
   title: "Streets 📍 @ekezia",
@@ -19,7 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={openSans.className}>
+      <body className={`${plusJakartaSans.variable} ${plusJakartaSans.className}`}>
         <ModelContextProvider>
           <LanguageContextProvider>
             <LocationContextProvider>

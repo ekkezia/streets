@@ -4,7 +4,7 @@ import { ArrowDirection } from "@/components/atoms/model-arrow";
 export const SUPABASE_URL =
   "https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/";
 
-export type ProjectId = "jakarta" | "hong-kong" | "singapore" | "cambodia";
+export type ProjectId = "jakarta" | "hong-kong" | "singapore" | "cambodia" | "new-york-city";
 
 export type DirectionTuple = [ArrowDirection, number, string | null];
 
@@ -18,6 +18,7 @@ export type Config = {
       [key: string]: {
         latitude: number | undefined;
         longitude: number | undefined;
+        defaultRotationOffset?: number | string;
       };
     };
     languageOptions: TLanguage[];
@@ -25,6 +26,7 @@ export type Config = {
     supabasePrefixPath: string;
     mediaPrefixPath?: string;
     supabaseMediaExtension?: string;
+    defaultRotationOffset?: number | string;
     mediaByIndex?: {
       [key: number]: string;
     };
@@ -381,7 +383,154 @@ export const CONFIG: Config = {
       76: [["reverse", -39, null]],
     },
   },
-
+  "new-york-city": {
+    title: "New York City",
+    information: "Kezia teaches you how to take 360 photographs in Chinatown, New York City.",
+    credits: [
+      ["Elizabeth Kezia", "360 Instructor", "ekezia"],
+    ],
+    defaultRotationOffset: -60,
+    languageOptions: ["en"],
+    locationInfo: ["Chinatown"],
+    supabaseFolder: "streets_nyc_190426",
+    supabasePrefixPath: "streets_nyc_190426",
+    numberOfImages: 29,
+    text: {},
+    arrows: {
+      2: [["reverse", -1, null],
+        ["left", 1, null],],
+      14: [["reverse", -1, null],
+        ["left", 1, "Turn to Grand St"],],
+      15: [["forward", 1, null],
+        ["left", -1, "Turn back"],],
+      26: [["reverse", -1, null],
+        ["left", 1, "Turn"],],
+      27: [["forward", 1, null],
+        ["left", -1, "Turn back"],],
+      29: [["reverse", -1, null],
+        ["left", 1, "Go to All Street"],],
+      30: [["forward", -29, "Restart"]]
+    },
+    supabaseMediaExtension: "mp4",
+    location: {
+      1: {
+        latitude: 40.716746,
+        longitude: -73.993425
+      },
+      2: {
+        latitude: 40.716717,
+        longitude: -73.993452
+      },
+      3: {
+        latitude: 40.716742,
+        longitude: -73.993505,
+      },
+      4: {
+        latitude: 40.716770,
+        longitude: -73.993556,
+      },
+      5: {
+        latitude: 40.716858,
+        longitude: -73.993548,
+      },
+      6: {
+        latitude: 40.716920,
+        longitude: -73.993519,
+      },
+      7: {
+        latitude: 40.716938,
+        longitude: -73.993507,
+      },
+      8: {
+        latitude: 40.717053,
+        longitude: -73.993458,
+      },
+      9: {
+        latitude: 40.717075,
+        longitude: -73.993441,
+      },
+      10: {
+        latitude: 40.717147,
+        longitude: -73.993411,
+      },
+      11: {
+        latitude: 40.717306,
+        longitude: -73.993339,
+      },
+      12: {
+        latitude: 40.717306,
+        longitude: -73.993351,
+      },
+      13: {
+        latitude: 40.717550,
+        longitude: -73.993195,
+      },
+      14: {
+        latitude: 40.717717,
+        longitude: -73.993109,
+      },
+      15: {
+        latitude: 40.717814,
+        longitude: -73.992956,
+      },
+      16: {
+        latitude: 40.717776,
+        longitude: -73.992855,
+      },
+      17: {
+        latitude: 40.717703,
+        longitude: -73.992643,
+      },
+      18: {
+        latitude: 40.717637,
+        longitude: -73.992381,
+      },
+      19: {
+        latitude: 40.717599,
+        longitude: -73.992329,
+      },
+      20: {
+        latitude: 40.717340,
+        longitude: -73.992458,
+      },
+      21: {
+        latitude: 40.717249,
+        longitude: -73.992503,
+      },
+      22: {
+        latitude: 40.71725,
+        longitude: -73.99251,
+      },
+      23: {
+        latitude: 40.71702,
+        longitude: -73.99263,
+      },
+      24: {
+        latitude: 40.71687,
+        longitude: -73.99273,
+      },
+      25: {
+        latitude: 40.71681,
+        longitude: -73.99277,
+      },
+      26: {
+        latitude: 40.716688,
+        longitude: -73.992791,
+      },
+      27: {
+        latitude: 40.716566,
+        longitude: -73.992917,
+      },
+      28: {
+        latitude: 40.716652,
+        longitude: -73.993248,
+      },
+      29: {
+        latitude: 40.716704,
+        longitude: -73.993407,
+      },
+    },
+  },
   singapore: {
     title: "Singapore",
     information: "Inarah takes you on a parallel journey in Jakarta.",
