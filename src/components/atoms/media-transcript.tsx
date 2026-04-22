@@ -94,17 +94,30 @@ const getLocalAssetFallbackPath = (mediaUrl: string) => {
   }
 };
 
+const trimWordsToMaxChars = (words: string[], maxChars: number) => {
+  if (maxChars <= 0) {
+    return [];
+  }
+
+  const nextWords = words.filter(Boolean);
+  while (nextWords.length && nextWords.join(" ").length > maxChars) {
+    nextWords.shift();
+  }
+
+  return nextWords;
+};
+
 const MediaTranscript: React.FC<{
   projectId: ProjectId;
-  width?: number;
+  width?: number | string;
   height?: number;
   maxWords?: number;
   language?: string;
 }> = ({
   projectId,
-  width = 300,
-  height = 110,
-  maxWords = 60,
+  width = "50vw",
+  height = 'fit-content',
+  maxWords = 10,
   language = "en-US",
 }) => {
   const pathname = usePathname();
@@ -116,16 +129,45 @@ const MediaTranscript: React.FC<{
   const [finalWords, setFinalWords] = useState<string[]>([]);
   const [interimWords, setInterimWords] = useState<string[]>([]);
   const [restartToken, setRestartToken] = useState(0);
+  const [maxVisibleChars, setMaxVisibleChars] = useState(240);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const shouldRunRef = useRef(true);
+  const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
+  const maxVisibleCharsRef = useRef(maxVisibleChars);
+
+  useEffect(() => {
+    maxVisibleCharsRef.current = maxVisibleChars;
+    setFinalWords((current) => trimWordsToMaxChars(current, maxVisibleChars));
+    setInterimWords((current) => trimWordsToMaxChars(current, maxVisibleChars));
+  }, [maxVisibleChars]);
 
   useEffect(() => {
     setFinalWords([]);
     setInterimWords([]);
   }, [imageKey, projectId]);
+
+  useEffect(() => {
+    const viewport = transcriptViewportRef.current;
+    if (!viewport || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const updateMaxVisibleChars = () => {
+      const charsPerLine = Math.max(22, Math.floor(viewport.clientWidth / 7));
+      setMaxVisibleChars(charsPerLine);
+    };
+
+    updateMaxVisibleChars();
+    const observer = new ResizeObserver(updateMaxVisibleChars);
+    observer.observe(viewport);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     shouldRunRef.current = true;
@@ -176,7 +218,6 @@ const MediaTranscript: React.FC<{
     }
 
     let disposed = false;
-    let attemptedFallback = false;
 
     const startRecognition = (track: MediaStreamTrack, recognition: SpeechRecognitionLike) => {
       if (!shouldRunRef.current || disposed) {
@@ -195,6 +236,81 @@ const MediaTranscript: React.FC<{
       }
     };
 
+    const loadVideoSource = (video: HTMLVideoElement, source: string) =>
+      new Promise<boolean>((resolve) => {
+        let settled = false;
+        const timeoutId = window.setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          resolve(false);
+        }, 8000);
+
+        const cleanupListeners = () => {
+          window.clearTimeout(timeoutId);
+          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+          video.removeEventListener("error", handleError);
+        };
+
+        const handleLoadedMetadata = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanupListeners();
+          resolve(true);
+        };
+
+        const handleError = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanupListeners();
+          resolve(false);
+        };
+
+        video.addEventListener("loadedmetadata", handleLoadedMetadata);
+        video.addEventListener("error", handleError);
+
+        video.src = source;
+        video.load();
+      });
+
+    const waitForAudioTrack = (stream: MediaStream, timeoutMs = 3000) =>
+      new Promise<MediaStreamTrack | null>((resolve) => {
+        const immediateTrack = stream.getAudioTracks()[0];
+        if (immediateTrack) {
+          resolve(immediateTrack);
+          return;
+        }
+
+        let settled = false;
+        const timeoutId = window.setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          stream.removeEventListener("addtrack", handleAddTrack);
+          resolve(null);
+        }, timeoutMs);
+
+        const handleAddTrack = (event: Event) => {
+          const track = (event as MediaStreamTrackEvent).track;
+          if (!track || track.kind !== "audio" || settled) {
+            return;
+          }
+
+          settled = true;
+          window.clearTimeout(timeoutId);
+          stream.removeEventListener("addtrack", handleAddTrack);
+          resolve(track);
+        };
+
+        stream.addEventListener("addtrack", handleAddTrack);
+      });
+
     const init = async () => {
       setStatus("loading");
       setErrorMessage(null);
@@ -208,53 +324,61 @@ const MediaTranscript: React.FC<{
       videoRef.current = video;
 
       const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
-
-      const setSource = (source: string) => {
-        video.src = source;
-        video.load();
-      };
-
-      video.onerror = () => {
-        if (disposed || !shouldRunRef.current) {
-          return;
-        }
-
-        if (!attemptedFallback && fallbackMediaUrl && video.src !== fallbackMediaUrl) {
-          attemptedFallback = true;
-          setSource(fallbackMediaUrl);
-          return;
-        }
-
-        setStatus("error");
-        setErrorMessage("Failed to load media audio for transcription.");
-      };
-
-      setSource(mediaUrl);
-
-      try {
-        await video.play();
-      } catch {
-        // Keep going; captureStream may still produce a track once media buffers.
-      }
+      const candidateSources = [mediaUrl, fallbackMediaUrl]
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .filter((value, index, all) => all.indexOf(value) === index);
 
       const captureVideo = video as HTMLVideoElement & {
         captureStream?: () => MediaStream;
         mozCaptureStream?: () => MediaStream;
       };
-      const stream = captureVideo.captureStream?.() ?? captureVideo.mozCaptureStream?.();
 
-      if (!stream) {
-        setStatus("unsupported");
-        setErrorMessage("Media stream capture is unavailable in this browser.");
-        return;
+      const getTrackFromSource = async (source: string) => {
+        if (!shouldRunRef.current || disposed) {
+          return null;
+        }
+
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+
+        const loaded = await loadVideoSource(video, source);
+        if (!loaded || !shouldRunRef.current || disposed) {
+          return null;
+        }
+
+        try {
+          await video.play();
+        } catch {
+          // Keep trying; captureStream may still expose tracks after metadata load.
+        }
+
+        const stream =
+          captureVideo.captureStream?.() ?? captureVideo.mozCaptureStream?.();
+        if (!stream) {
+          setStatus("unsupported");
+          setErrorMessage("Media stream capture is unavailable in this browser.");
+          return null;
+        }
+
+        streamRef.current = stream;
+        return waitForAudioTrack(stream, 3500);
+      };
+
+      let audioTrack: MediaStreamTrack | null = null;
+      for (const source of candidateSources) {
+        audioTrack = await getTrackFromSource(source);
+        if (audioTrack) {
+          break;
+        }
       }
 
-      streamRef.current = stream;
-
-      const audioTrack = stream.getAudioTracks()[0];
       if (!audioTrack) {
         setStatus("no-audio-track");
-        setErrorMessage("This video does not expose an audio track for transcription.");
+        setErrorMessage(
+          "No audio track detected from remote media or local fallback.",
+        );
         return;
       }
 
@@ -283,14 +407,22 @@ const MediaTranscript: React.FC<{
           }
 
           if (result.isFinal) {
-            setFinalWords((current) => [...current, ...words].slice(-maxWords));
+            setFinalWords((current) => {
+              const withWordCap = [...current, ...words].slice(-maxWords);
+              return trimWordsToMaxChars(
+                withWordCap,
+                maxVisibleCharsRef.current,
+              );
+            });
             nextInterimWords = [];
           } else {
             nextInterimWords = words;
           }
         }
 
-        setInterimWords(nextInterimWords);
+        setInterimWords(
+          trimWordsToMaxChars(nextInterimWords, maxVisibleCharsRef.current),
+        );
       };
 
       recognition.onerror = (event: any) => {
@@ -341,30 +473,26 @@ const MediaTranscript: React.FC<{
     }
   }, [status]);
 
+  const displayWords = useMemo(
+    () => trimWordsToMaxChars([...finalWords, ...interimWords], maxVisibleChars),
+    [finalWords, interimWords, maxVisibleChars],
+  );
+
   return (
     <div
-      className="fixed bottom-[242px] right-2 z-[1100] rounded-md border-2 border-white bg-black/75 p-2 text-white shadow-md"
+      className="fixed bottom-2 left-1/2 z-[1100] -translate-x-1/2 rounded-md border-2 border-white bg-black/75 p-2 text-white shadow-md"
       style={{ width, minHeight: height }}
     >
-      <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.12em] text-white/85">
-        <span>Audio Transcript</span>
-        <span>{statusLabel}</span>
-      </div>
-
-      <div className="max-h-[84px] overflow-y-auto rounded bg-white/10 px-2 py-1 text-[11px] leading-5">
-        {finalWords.length === 0 && interimWords.length === 0 && (
+      <div
+        ref={transcriptViewportRef}
+        className="h-9 overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 text-[14px] leading-7"
+      >
+        {displayWords.length === 0 && (
           <span className="text-white/70">Waiting for speech...</span>
         )}
-        {finalWords.map((word, index) => (
-          <span key={`final-${index}`} className="mr-1 inline-block text-white">
-            {word}
-          </span>
-        ))}
-        {interimWords.map((word, index) => (
-          <span key={`interim-${index}`} className="mr-1 inline-block text-cyan-200/90">
-            {word}
-          </span>
-        ))}
+        {displayWords.length > 0 && (
+          <span className="text-white">{displayWords.join(" ")}</span>
+        )}
       </div>
 
       {errorMessage && <div className="mt-1 text-[10px] text-[#ffd1d1]">{errorMessage}</div>}

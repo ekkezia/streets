@@ -18,7 +18,6 @@ import GlassOrb3DProjection from "../atoms/glass-orb-3d-projection";
 import GlassOrbProjection, {
   DEFAULT_GLASS_ORB_SETTINGS,
   GlassOrbSettings,
-  OrbRotationSnapshot,
 } from "../atoms/glass-orb-projection";
 import {
   CONFIG,
@@ -40,13 +39,72 @@ import { useLanguageContext } from "@/contexts/language-context";
 import useRestrictedUiAccess from "@/hooks/useRestrictedUiAccess";
 
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg"];
-const ORB_ROTATION_SEND_INTERVAL_MS = 66;
+const AUDIO_UNLOCK_SESSION_KEY = "streets_audio_unlocked";
+const ORB_AUTOPLAY_INTERVAL_MS = 2600;
+const ORB_AUTOPLAY_START_INDEX = 1;
+const ORB_AUTOPLAY_END_INDEX = 30;
+
+declare global {
+  interface Window {
+    __streetsAudioUnlocked?: boolean;
+  }
+}
 
 const stripQueryAndHash = (url: string) => url.split("#")[0].split("?")[0];
 
 const isVideoMediaUrl = (url: string) => {
   const normalizedUrl = stripQueryAndHash(url).toLowerCase();
   return VIDEO_EXTENSIONS.some((extension) => normalizedUrl.endsWith(extension));
+};
+
+const hasUserActivatedPage = () => {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  return Boolean(
+    (navigator as Navigator & { userActivation?: { hasBeenActive?: boolean } })
+      .userActivation?.hasBeenActive,
+  );
+};
+
+const isAudioUnlockRemembered = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  if (window.__streetsAudioUnlocked) {
+    return true;
+  }
+
+  try {
+    if (window.sessionStorage.getItem(AUDIO_UNLOCK_SESSION_KEY) === "1") {
+      window.__streetsAudioUnlocked = true;
+      return true;
+    }
+  } catch {
+    // Ignore storage access failures.
+  }
+
+  if (hasUserActivatedPage()) {
+    window.__streetsAudioUnlocked = true;
+    return true;
+  }
+
+  return false;
+};
+
+const rememberAudioUnlock = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.__streetsAudioUnlocked = true;
+  try {
+    window.sessionStorage.setItem(AUDIO_UNLOCK_SESSION_KEY, "1");
+  } catch {
+    // Ignore storage access failures.
+  }
 };
 
 const parseRotationOffsetToRadians = (value: unknown): number | null => {
@@ -143,11 +201,40 @@ const useActiveMediaTexture = (mediaUrl: string) => {
       const videoElement = document.createElement("video");
       videoElement.crossOrigin = "anonymous";
       videoElement.loop = true;
-      videoElement.muted = true;
+      videoElement.muted = !isAudioUnlockRemembered();
+      videoElement.volume = 1;
       videoElement.autoplay = true;
       videoElement.playsInline = true;
       videoElement.preload = "auto";
       let hasAttemptedFallback = false;
+      let audioUnlocked = isAudioUnlockRemembered();
+
+      const tryUnlockVideoAudio = () => {
+        if (disposed) {
+          return;
+        }
+
+        if (audioUnlocked && !videoElement.muted) {
+          return;
+        }
+
+        videoElement.muted = false;
+        videoElement.play().catch(() => {
+          videoElement.muted = true;
+          audioUnlocked = false;
+        }).then(() => {
+          if (videoElement.muted) {
+            return;
+          }
+
+          audioUnlocked = true;
+          rememberAudioUnlock();
+        });
+      };
+
+      const handleUserInteractionForAudio = () => {
+        tryUnlockVideoAudio();
+      };
 
       const setVideoSource = (nextSource: string) => {
         videoElement.src = nextSource;
@@ -171,6 +258,9 @@ const useActiveMediaTexture = (mediaUrl: string) => {
         setActiveTexture(null);
       };
       videoElement.addEventListener("error", handleVideoError);
+      window.addEventListener("pointerdown", handleUserInteractionForAudio);
+      window.addEventListener("keydown", handleUserInteractionForAudio);
+      window.addEventListener("touchstart", handleUserInteractionForAudio);
 
       const videoTexture = new VideoTexture(videoElement);
       videoTexture.colorSpace = SRGBColorSpace;
@@ -182,6 +272,20 @@ const useActiveMediaTexture = (mediaUrl: string) => {
       localTexture = videoTexture;
       setActiveTexture(videoTexture);
       setVideoSource(mediaUrl);
+      if (audioUnlocked) {
+        tryUnlockVideoAudio();
+      }
+
+      const cleanupVideoEvents = () => {
+        videoElement.removeEventListener("error", handleVideoError);
+        window.removeEventListener("pointerdown", handleUserInteractionForAudio);
+        window.removeEventListener("keydown", handleUserInteractionForAudio);
+        window.removeEventListener("touchstart", handleUserInteractionForAudio);
+      };
+
+      // Reuse this cleanup in effect return via closure.
+      (videoElement as HTMLVideoElement & { __cleanupVideoEvents?: () => void }).__cleanupVideoEvents =
+        cleanupVideoEvents;
     } else {
       const loader = new TextureLoader();
       let hasAttemptedFallback = false;
@@ -227,6 +331,11 @@ const useActiveMediaTexture = (mediaUrl: string) => {
       }
 
       if (localVideoElement) {
+        (
+          localVideoElement as HTMLVideoElement & {
+            __cleanupVideoEvents?: () => void;
+          }
+        ).__cleanupVideoEvents?.();
         localVideoElement.pause();
         localVideoElement.src = "";
         localVideoElement.load();
@@ -292,12 +401,8 @@ const OrbControls: React.FC<{
   onFlipYChange: React.Dispatch<React.SetStateAction<boolean>>;
   debugEnabled: boolean;
   onDebugEnabledChange: React.Dispatch<React.SetStateAction<boolean>>;
-  listenerMode: boolean;
-  onListenerModeChange: React.Dispatch<React.SetStateAction<boolean>>;
-  orbSocketConnected: boolean;
-  isOrbParent: boolean;
-  activeParentId: string | null;
-  parentWarning: string | null;
+  autoplayEnabled: boolean;
+  onAutoplayEnabledChange: (enabled: boolean) => void;
 }> = ({
   settings,
   onChange,
@@ -320,19 +425,9 @@ const OrbControls: React.FC<{
   onFlipYChange,
   debugEnabled,
   onDebugEnabledChange,
-  listenerMode,
-  onListenerModeChange,
-  orbSocketConnected,
-  isOrbParent,
-  activeParentId,
-  parentWarning,
+  autoplayEnabled,
+  onAutoplayEnabledChange,
 }) => {
-  const roleLabel = listenerMode
-    ? "Listener"
-    : isOrbParent
-      ? "Parent (Broadcasting)"
-      : "Parent Request Pending";
-
   return (
     <div className="fixed bottom-4 left-4 z-20 w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-white/15 bg-black/70 p-4 text-xs text-white backdrop-blur-md">
       <div className="mb-3">
@@ -348,27 +443,21 @@ const OrbControls: React.FC<{
       <div className="space-y-3">
         <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
-            Orb Role
+            Orb Autoplay
           </p>
           <button
             className="w-full rounded-md border border-white/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-white transition hover:bg-white hover:text-black"
-            onClick={() => onListenerModeChange((current) => !current)}
+            onClick={() => onAutoplayEnabledChange(!autoplayEnabled)}
             type="button"
           >
-            {listenerMode ? "Switch to Parent" : "Switch to Listener"}
+            {autoplayEnabled ? "Pause Autoplay" : "Resume Autoplay"}
           </button>
-          <p className="text-[11px] text-white/75">Role: {roleLabel}</p>
-          <p className="text-[11px] text-white/55">
-            Socket: {orbSocketConnected ? "Connected" : "Disconnected"}
+          <p className="text-[11px] text-white/75">
+            Status: {autoplayEnabled ? "On" : "Off"}
           </p>
-          {activeParentId && !isOrbParent && (
-            <p className="text-[11px] text-white/55">
-              Active parent: {activeParentId}
-            </p>
-          )}
-          {parentWarning && (
-            <p className="text-[11px] font-medium text-[#ffaeae]">{parentWarning}</p>
-          )}
+          <p className="text-[11px] text-white/55">
+            Auto-steps from 1 to 30 in orb modes unless map navigation turns it off.
+          </p>
         </div>
         {orbControlRanges.map(({ id, label, min, max, step }) => (
           <label className="block" key={id}>
@@ -615,10 +704,56 @@ const EquirectangularView: React.FC<{
 }> = ({ mediaUrl, isVideo, currentMoves, onMove }) => {
   const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
   const [resolvedMediaUrl, setResolvedMediaUrl] = useState(mediaUrl);
+  const [videoMuted, setVideoMuted] = useState(() => !isAudioUnlockRemembered());
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     setResolvedMediaUrl(mediaUrl);
+    setVideoMuted(!isAudioUnlockRemembered());
   }, [mediaUrl]);
+
+  useEffect(() => {
+    if (!isVideo) {
+      return;
+    }
+
+    const unlockAudio = () => {
+      setVideoMuted(false);
+      const target = videoRef.current;
+      if (!target) {
+        return;
+      }
+
+      target.muted = false;
+      target
+        .play()
+        .catch(() => {
+          target.muted = true;
+          setVideoMuted(true);
+        })
+        .then(() => {
+          if (target.muted) {
+            return;
+          }
+
+          setVideoMuted(false);
+          rememberAudioUnlock();
+        });
+    };
+
+    window.addEventListener("pointerdown", unlockAudio);
+    window.addEventListener("keydown", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio);
+    if (isAudioUnlockRemembered()) {
+      unlockAudio();
+    }
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+    };
+  }, [isVideo, resolvedMediaUrl]);
 
   const handleMediaError = useCallback(() => {
     if (!fallbackMediaUrl) {
@@ -638,8 +773,9 @@ const EquirectangularView: React.FC<{
             autoPlay
             className="h-full w-full object-contain"
             loop
-            muted
+            muted={videoMuted}
             playsInline
+            ref={videoRef}
             src={resolvedMediaUrl}
             onError={handleMediaError}
           />
@@ -686,9 +822,6 @@ const ProjectScene: React.FC<{
   trackedSubjects: TrackedSubject[];
   headFollowPositionEnabled: boolean;
   headFollowPositionStrength: number;
-  listenerMode: boolean;
-  remoteOrbRotation: OrbRotationSnapshot | null;
-  onOrbRotationChange: (rotation: OrbRotationSnapshot) => void;
   sphereDefaultRotationOffset: number;
 }> = ({
   projectId,
@@ -704,9 +837,6 @@ const ProjectScene: React.FC<{
   trackedSubjects,
   headFollowPositionEnabled,
   headFollowPositionStrength,
-  listenerMode,
-  remoteOrbRotation,
-  onOrbRotationChange,
   sphereDefaultRotationOffset,
 }) => {
   const textureIndex = (doubleBy ? doubleBy + currentModel : currentModel) - 1;
@@ -733,9 +863,9 @@ const ProjectScene: React.FC<{
           trackedSubjects={trackedSubjects}
           headFollowPositionEnabled={headFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
-          listenerMode={listenerMode}
-          remoteRotation={remoteOrbRotation}
-          onRotationChange={onOrbRotationChange}
+          listenerMode={false}
+          remoteRotation={null}
+          onRotationChange={() => {}}
         />
       ) : orbMode ? (
         <GlassOrbProjection
@@ -744,9 +874,9 @@ const ProjectScene: React.FC<{
           trackedSubjects={trackedSubjects}
           headFollowPositionEnabled={headFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
-          listenerMode={listenerMode}
-          remoteRotation={remoteOrbRotation}
-          onRotationChange={onOrbRotationChange}
+          listenerMode={false}
+          remoteRotation={null}
+          onRotationChange={() => {}}
         />
       ) : (
         <>
@@ -844,31 +974,11 @@ const ModelCanvas: React.FC<{
     useState(1);
   const [hideOrbHud, setHideOrbHud] = useState(false);
   const [cameraOptions, setCameraOptions] = useState<CameraOption[]>([]);
-  const [listenerMode, setListenerMode] = useState(false);
-  const [orbSocketConnected, setOrbSocketConnected] = useState(false);
-  const [isOrbParent, setIsOrbParent] = useState(false);
-  const [activeParentId, setActiveParentId] = useState<string | null>(null);
-  const [parentWarning, setParentWarning] = useState<string | null>(null);
-  const [remoteOrbRotation, setRemoteOrbRotation] =
-    useState<OrbRotationSnapshot | null>(null);
-
-  const orbClientIdRef = useRef(`orb-${Math.random().toString(36).slice(2, 10)}`);
-  const orbSocketRef = useRef<WebSocket | null>(null);
-  const listenerModeRef = useRef(listenerMode);
-  const isOrbParentRef = useRef(isOrbParent);
-  const lastOrbRotationSentAtRef = useRef(0);
+  const [orbAutoplayEnabled, setOrbAutoplayEnabledState] = useState(true);
 
   useEffect(() => {
     setCurrentModel(parseInt(currentIndexToPathname));
   }, [currentIndexToPathname]);
-
-  useEffect(() => {
-    listenerModeRef.current = listenerMode;
-  }, [listenerMode]);
-
-  useEffect(() => {
-    isOrbParentRef.current = isOrbParent;
-  }, [isOrbParent]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -886,6 +996,15 @@ const ModelCanvas: React.FC<{
     }
     setViewMode("sphere");
   }, [isRestrictedUiAllowed, pathname]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    setOrbAutoplayEnabledState(params.get("autoplay") !== "off");
+  }, [pathname]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isRestrictedUiAllowed) {
@@ -1092,208 +1211,75 @@ const ModelCanvas: React.FC<{
     );
     return parsedProjectOffset ?? 0;
   }, [currentModel, projectId]);
+  const maxOrbAutoplayIndex = Math.min(
+    ORB_AUTOPLAY_END_INDEX,
+    CONFIG[projectId].numberOfImages,
+  );
 
-  useEffect(() => {
-    if (!showOrbUi || typeof window === "undefined") {
-      return;
-    }
+  const setOrbAutoplayEnabled = useCallback(
+    (enabled: boolean) => {
+      setOrbAutoplayEnabledState(enabled);
 
-    let disposed = false;
-    const orbClientId = orbClientIdRef.current;
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${window.location.host}/ws/subject`);
-    orbSocketRef.current = ws;
-
-    const sendClaim = () => {
-      if (ws.readyState !== WebSocket.OPEN) {
+      if (typeof window === "undefined") {
         return;
       }
 
-      ws.send(
-        JSON.stringify({
-          type: "orb_parent_claim",
-          clientId: orbClientId,
-        }),
-      );
-    };
-
-    ws.onopen = () => {
-      if (disposed) {
-        return;
+      const params = new URLSearchParams(window.location.search);
+      if (enabled) {
+        params.delete("autoplay");
+      } else {
+        params.set("autoplay", "off");
       }
 
-      setOrbSocketConnected(true);
-
-      if (!listenerModeRef.current) {
-        sendClaim();
-      }
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(String(event.data)) as Record<string, unknown>;
-        const messageType = payload.type;
-
-        if (messageType === "orb_parent_status") {
-          const parentId =
-            typeof payload.parentId === "string" ? payload.parentId : null;
-
-          setActiveParentId(parentId);
-          setIsOrbParent(parentId === orbClientId);
-
-          if (
-            !listenerModeRef.current &&
-            !parentId &&
-            ws.readyState === WebSocket.OPEN
-          ) {
-            sendClaim();
-          }
-          return;
-        }
-
-        if (messageType === "orb_parent_claim_result") {
-          const success = payload.ok === true;
-          const parentId =
-            typeof payload.parentId === "string" ? payload.parentId : null;
-
-          setActiveParentId(parentId);
-
-          if (success) {
-            setIsOrbParent(parentId === orbClientId);
-            setParentWarning(null);
-            return;
-          }
-
-          setIsOrbParent(false);
-          setParentWarning(
-            "Parent mode unavailable: another client is already controlling the orb. Switched to listener mode.",
-          );
-          setListenerMode(true);
-          return;
-        }
-
-        if (messageType === "orb_rotation") {
-          const sourceId =
-            typeof payload.sourceId === "string" ? payload.sourceId : null;
-          const yaw = Number(payload.yaw);
-          const xRotation = Number(payload.xRotation);
-
-          if (
-            !sourceId ||
-            sourceId === orbClientId ||
-            !Number.isFinite(yaw) ||
-            !Number.isFinite(xRotation)
-          ) {
-            return;
-          }
-
-          setRemoteOrbRotation({ yaw, xRotation });
-        }
-      } catch {
-        // Ignore malformed websocket payloads.
-      }
-    };
-
-    ws.onclose = () => {
-      if (disposed) {
-        return;
-      }
-      setOrbSocketConnected(false);
-      setIsOrbParent(false);
-      setActiveParentId(null);
-    };
-
-    ws.onerror = () => {
-      setOrbSocketConnected(false);
-    };
-
-    return () => {
-      disposed = true;
-      const socket = orbSocketRef.current;
-      orbSocketRef.current = null;
-      setOrbSocketConnected(false);
-      setIsOrbParent(false);
-      setActiveParentId(null);
-      setRemoteOrbRotation(null);
-
-      if (socket?.readyState === WebSocket.OPEN && isOrbParentRef.current) {
-        socket.send(
-          JSON.stringify({
-            type: "orb_parent_release",
-            clientId: orbClientId,
-          }),
-        );
-      }
-
-      socket?.close();
-    };
-  }, [showOrbUi]);
-
-  useEffect(() => {
-    if (!showOrbUi) {
-      return;
-    }
-
-    const orbClientId = orbClientIdRef.current;
-
-    if (listenerMode) {
-      setIsOrbParent(false);
-    } else {
-      setParentWarning(null);
-    }
-
-    const socket = orbSocketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    if (listenerMode) {
-      socket.send(
-        JSON.stringify({
-          type: "orb_parent_release",
-          clientId: orbClientId,
-        }),
-      );
-      return;
-    }
-
-    socket.send(
-      JSON.stringify({
-        type: "orb_parent_claim",
-        clientId: orbClientId,
-      }),
-    );
-  }, [listenerMode, showOrbUi]);
-
-  const handleOrbRotationChange = useCallback(
-    (rotation: OrbRotationSnapshot) => {
-      if (!showOrbUi || listenerModeRef.current || !isOrbParentRef.current) {
-        return;
-      }
-
-      const socket = orbSocketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        return;
-      }
-
-      const now = performance.now();
-      if (now - lastOrbRotationSentAtRef.current < ORB_ROTATION_SEND_INTERVAL_MS) {
-        return;
-      }
-
-      lastOrbRotationSentAtRef.current = now;
-      socket.send(
-        JSON.stringify({
-          type: "orb_rotation",
-          clientId: orbClientIdRef.current,
-          yaw: rotation.yaw,
-          xRotation: rotation.xRotation,
-          timestamp: Date.now(),
-        }),
+      const query = params.toString();
+      router.replace(
+        `/${projectId}/${currentModel.toString()}${query ? `?${query}` : ""}`,
       );
     },
-    [showOrbUi],
+    [currentModel, projectId, router],
   );
+
+  useEffect(() => {
+    if (!showOrbUi || !isOrbLikeMode || !orbAutoplayEnabled) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("autoplay") === "off") {
+          setOrbAutoplayEnabledState(false);
+          return;
+        }
+      }
+
+      const nextModel =
+        currentModel >= maxOrbAutoplayIndex || currentModel < ORB_AUTOPLAY_START_INDEX
+          ? ORB_AUTOPLAY_START_INDEX
+          : currentModel + 1;
+
+      setCurrentModel(nextModel);
+
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const query = window.location.search ?? "";
+      router.replace(`/${projectId}/${nextModel.toString()}${query}`);
+    }, ORB_AUTOPLAY_INTERVAL_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    currentModel,
+    isOrbLikeMode,
+    maxOrbAutoplayIndex,
+    orbAutoplayEnabled,
+    projectId,
+    router,
+    showOrbUi,
+  ]);
 
   const currentMoves: DirectionTuple[] = Object.keys(CONFIG[projectId].arrows).includes(
     currentModel.toString(),
@@ -1466,9 +1452,6 @@ const ModelCanvas: React.FC<{
               headFollowPositionEnabled && trackingCameraEnabled
             }
             headFollowPositionStrength={headFollowPositionStrength}
-            listenerMode={listenerMode}
-            remoteOrbRotation={remoteOrbRotation}
-            onOrbRotationChange={handleOrbRotationChange}
             sphereDefaultRotationOffset={sphereDefaultRotationOffset}
           />
         </Suspense>
@@ -1511,12 +1494,8 @@ const ModelCanvas: React.FC<{
           onFlipYChange={setTrackingFlipY}
           debugEnabled={trackingDebugEnabled}
           onDebugEnabledChange={setTrackingDebugEnabled}
-          listenerMode={listenerMode}
-          onListenerModeChange={setListenerMode}
-          orbSocketConnected={orbSocketConnected}
-          isOrbParent={isOrbParent}
-          activeParentId={activeParentId}
-          parentWarning={parentWarning}
+          autoplayEnabled={orbAutoplayEnabled}
+          onAutoplayEnabledChange={setOrbAutoplayEnabled}
         />
       )}
     </>

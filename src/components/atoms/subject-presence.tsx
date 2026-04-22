@@ -21,7 +21,6 @@ type SubjectPresenceProps = {
   cameraBackdropEnabled?: boolean;
   cameraBackdropOpacity?: number;
   onSubjectsChange: (subjects: TrackedSubject[]) => void;
-  websocketUrl?: string;
 };
 
 const MEDIAPIPE_WASM_URL =
@@ -29,7 +28,6 @@ const MEDIAPIPE_WASM_URL =
 const MEDIAPIPE_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task";
 const SUBJECT_TTL_MS = 3500;
-const SEND_INTERVAL_MS = 80;
 const POSITION_SMOOTHING = 0.35;
 
 const clamp = (value: number, min: number, max: number) =>
@@ -47,7 +45,6 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
   cameraBackdropEnabled = false,
   cameraBackdropOpacity = 0.66,
   onSubjectsChange,
-  websocketUrl,
 }) => {
   const sourceIdRef = useRef(`subject-${Math.random().toString(36).slice(2, 10)}`);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -73,8 +70,6 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
           close: () => void;
         }
       | null = null;
-    let ws: WebSocket | null = null;
-    let lastSentAt = 0;
 
     const subjectsMap = new Map<string, TrackedSubject>();
     const debugFrameSize = { width: 320, height: 240 };
@@ -269,64 +264,6 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
       emitSubjects();
     };
 
-    const resolveWebsocketUrl = () => {
-      if (websocketUrl) {
-        return websocketUrl;
-      }
-
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      return `${protocol}://${window.location.host}/ws/subject`;
-    };
-
-    const parseIncomingSubject = (payload: unknown): TrackedSubject | null => {
-      if (!payload || typeof payload !== "object") {
-        return null;
-      }
-
-      const record = payload as Record<string, unknown>;
-      if (record.type !== "subject_pose") {
-        return null;
-      }
-
-      if (typeof record.sourceId !== "string") {
-        return null;
-      }
-
-      const now = Date.now();
-      const x = clamp(Number(record.x ?? 0.5), 0, 1);
-      const y = clamp(Number(record.y ?? 0.5), 0, 1);
-      const z = clamp(Number(record.z ?? 0), -2, 2);
-      const confidence = clamp(Number(record.confidence ?? 0), 0, 1);
-
-      return {
-        sourceId: record.sourceId,
-        x,
-        y,
-        z,
-        confidence,
-        lastUpdated: now,
-      };
-    };
-
-    try {
-      ws = new WebSocket(resolveWebsocketUrl());
-
-      ws.onmessage = (event) => {
-        try {
-          const parsed = JSON.parse(String(event.data));
-          const subject = parseIncomingSubject(parsed);
-
-          if (subject) {
-            upsertSubject(subject);
-          }
-        } catch {
-          // Ignore malformed socket payloads.
-        }
-      };
-    } catch {
-      // Ignore websocket setup failures and continue local tracking.
-    }
-
     staleTimer = window.setInterval(() => {
       const now = Date.now();
       let changed = false;
@@ -492,23 +429,6 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
             upsertSubject(trackedSubject);
             drawDebugFrame(trackedSubject);
 
-            if (
-              ws?.readyState === WebSocket.OPEN &&
-              nowPerf - lastSentAt >= SEND_INTERVAL_MS
-            ) {
-              ws.send(
-                JSON.stringify({
-                  type: "subject_pose",
-                  sourceId: trackedSubject.sourceId,
-                  x: trackedSubject.x,
-                  y: trackedSubject.y,
-                  z: trackedSubject.z,
-                  confidence: trackedSubject.confidence,
-                  timestamp: trackedSubject.lastUpdated,
-                }),
-              );
-              lastSentAt = nowPerf;
-            }
           } else {
             drawDebugFrame(null);
           }
@@ -537,10 +457,6 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
         window.clearInterval(staleTimer);
       }
 
-      if (ws) {
-        ws.close();
-      }
-
       if (poseLandmarker) {
         poseLandmarker.close();
       }
@@ -565,7 +481,6 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
     debugEnabled,
     cameraBackdropEnabled,
     onSubjectsChange,
-    websocketUrl,
   ]);
 
   return (

@@ -10,9 +10,8 @@ export default function RootLayout({
   return (
       <main className="flex w-full items-center justify-center">
         <SideMenu projectId='new-york-city' />
-        <MediaTranscript projectId='new-york-city' width={300} height={122} />
+        <MediaTranscript projectId='new-york-city' />
         <LocationMap projectId='new-york-city' width={300} height={225} zoom={18} />
-        <MediaTranscript projectId='new-york-city' width={300} height={122} />
         {children}
       </main>
   );

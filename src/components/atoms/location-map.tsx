@@ -190,9 +190,15 @@ const LocationMap: React.FC<{
   }, [visitedPathCoordinates]);
 
   const handleDotClick = (key: number) => {
-    const query =
-      typeof window !== "undefined" ? window.location.search ?? "" : "";
-    router.push(`/${projectId}/${key}${query}`);
+    if (typeof window === "undefined") {
+      router.push(`/${projectId}/${key}`);
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    params.set("autoplay", "off");
+    const query = params.toString();
+    router.push(`/${projectId}/${key}${query ? `?${query}` : ""}`);
   };
 
   const handleMapClick = (event: MapClickEvent) => {
