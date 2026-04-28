@@ -55,6 +55,19 @@ const parseImageKeyFromPathname = (pathname: string): number | null => {
 
 const formatCoordinate = (value: number) => value.toFixed(6);
 
+const isTouchLandscape = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const hasTouch =
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
+    "ontouchstart" in window ||
+    window.matchMedia?.("(pointer: coarse)").matches;
+
+  return hasTouch && window.innerWidth >= window.innerHeight;
+};
+
 const LocationMap: React.FC<{
   zoom?: number;
   width?: number;
@@ -65,11 +78,36 @@ const LocationMap: React.FC<{
   const pathname = usePathname();
   const router = useRouter();
   const [hoveredKey, setHoveredKey] = useState<number | null>(null);
+  const [isOrbLikeView, setIsOrbLikeView] = useState(false);
+  const [isTouchLandscapeOrbView, setIsTouchLandscapeOrbView] = useState(false);
   const [mapViewState, setMapViewState] = useState<MapViewState>({
     latitude: 0,
     longitude: 0,
     zoom,
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncViewMode = () => {
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get("view");
+      const nextIsOrbLikeView = view === "orb" || view === "orb3d";
+      setIsOrbLikeView(nextIsOrbLikeView);
+      setIsTouchLandscapeOrbView(nextIsOrbLikeView && isTouchLandscape());
+    };
+
+    syncViewMode();
+    const intervalId = window.setInterval(syncViewMode, 500);
+    window.addEventListener("resize", syncViewMode);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("resize", syncViewMode);
+    };
+  }, [pathname]);
 
   const locationPoints = useMemo(() => {
     const maxImageIndex = CONFIG[projectId].numberOfImages;
@@ -221,12 +259,23 @@ const LocationMap: React.FC<{
 
   return (
     <div>
-      <div className="fixed right-2 top-2 z-[998] rounded-md border-2 border-white bg-gray-900/60 px-2 py-1 text-[11px] text-white shadow-sm">
-        📍 [{formatCoordinate(activeLatitude)}°, {formatCoordinate(activeLongitude)}°]
-      </div>
-      <div className="fixed bottom-[176px] right-2 z-[1100] rounded-md bg-black/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
-        Hover a dot for lat/lon
-      </div>
+      {!isTouchLandscapeOrbView && (
+        <div
+          className={`fixed rounded-md border-2 border-white bg-gray-900/60 px-2 py-1 text-[11px] text-white shadow-sm ${
+            isOrbLikeView ? "z-[201]" : "right-2 top-2 z-[198]"
+          }`}
+          style={
+            isOrbLikeView
+              ? {
+                  right: "var(--overlay-map-right, 8px)",
+                  bottom: `calc(${height}px + var(--overlay-map-vertical, 8px) + 8px)`,
+                }
+              : undefined
+          }
+        >
+          📍 [{formatCoordinate(activeLatitude)}°, {formatCoordinate(activeLongitude)}°]
+        </div>
+      )}
       <Map
         mapLib={maplibregl}
         latitude={mapViewState.latitude}
@@ -254,9 +303,25 @@ const LocationMap: React.FC<{
           borderRadius: 8,
           height: height,
           position: "fixed",
-          bottom: "8px",
-          right: "8px",
-          zIndex: 1100,
+          bottom: isTouchLandscapeOrbView
+            ? undefined
+            : "var(--overlay-map-vertical, 8px)",
+          top: isTouchLandscapeOrbView
+            ? "calc(50% + var(--overlay-map-vertical, 0px))"
+            : undefined,
+          right: isTouchLandscapeOrbView
+            ? undefined
+            : "var(--overlay-map-right, 8px)",
+          left: isTouchLandscapeOrbView
+            ? "var(--overlay-map-right, 8px)"
+            : undefined,
+          zIndex: 200,
+          transform: isTouchLandscapeOrbView
+            ? "translateY(-50%) rotate(90deg)"
+            : undefined,
+          transformOrigin: isTouchLandscapeOrbView
+            ? "center center"
+            : undefined,
           boxShadow: "0px 0px 2px 1px rgba(0, 0, 0, 0.2)",
         }}
         mapStyle={OSM_RASTER_STYLE}
@@ -343,7 +408,7 @@ const LocationMap: React.FC<{
                 />
                 {hoveredKey === point.key && (
                   <div
-                    className="pointer-events-none absolute left-1/2 top-[-34px] z-[9999] -translate-x-1/2 whitespace-nowrap rounded bg-black/90 px-1.5 py-1 text-[10px] text-white shadow-lg"
+                    className="pointer-events-none absolute left-1/2 top-[-34px] z-[250] -translate-x-1/2 whitespace-nowrap rounded bg-black/90 px-1.5 py-1 text-[10px] text-white shadow-lg"
                     style={{
                       fontFamily:
                         "var(--font-plus-jakarta-sans), ui-sans-serif, system-ui, sans-serif",

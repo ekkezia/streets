@@ -1,14 +1,36 @@
 'use client'
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Dropdown from '../atoms/dropdown';
 import { CONFIG, languageOption, ProjectId } from '@/config/config';
 import { useLanguageContext } from '@/contexts/language-context';
 import Link from 'next/link';
 
+const isTouchDevice = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return Boolean(
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
+      "ontouchstart" in window ||
+      window.matchMedia?.("(pointer: coarse)").matches,
+  );
+};
+
 const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
   const [isOpen, setIsOpen] = useState(false)
+  const [hideOnTouch, setHideOnTouch] = useState(false)
   const { setCurrentLanguage, currentLanguage } = useLanguageContext()
+
+  useEffect(() => {
+    setHideOnTouch(isTouchDevice());
+  }, []);
+
+  if (hideOnTouch) {
+    return null;
+  }
+
   const handleSelect = (selectedLabel: string) => {
   const selectedOptionValue= Object.entries(languageOption).find(
     ([, option]) => option.label === selectedLabel

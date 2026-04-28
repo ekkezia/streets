@@ -15,6 +15,7 @@ const GlassOrb3DProjection: React.FC<{
   headFollowPositionEnabled?: boolean;
   headFollowPositionStrength?: number;
   listenerMode?: boolean;
+  allowPointerControlInListenerMode?: boolean;
   remoteRotation?: OrbRotationSnapshot | null;
   onRotationChange?: (rotation: OrbRotationSnapshot) => void;
 }> = ({
@@ -24,6 +25,7 @@ const GlassOrb3DProjection: React.FC<{
   headFollowPositionEnabled = false,
   headFollowPositionStrength = 1,
   listenerMode = false,
+  allowPointerControlInListenerMode = false,
   remoteRotation = null,
   onRotationChange,
 }) => {
@@ -76,14 +78,11 @@ const GlassOrb3DProjection: React.FC<{
             headFollowPositionEnabled={headFollowPositionEnabled}
             headFollowPositionStrength={headFollowPositionStrength}
             listenerMode={listenerMode}
+            allowPointerControlInListenerMode={allowPointerControlInListenerMode}
             remoteRotation={
               listenerMode && remoteRotation
                 ? {
-                    yaw:
-                      MathUtils.euclideanModulo(
-                        remoteRotation.yaw + view.yawOffset + Math.PI,
-                        Math.PI * 2,
-                      ) - Math.PI,
+                    yaw: remoteRotation.yaw,
                     xRotation: remoteRotation.xRotation,
                   }
                 : null

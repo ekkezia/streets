@@ -107,6 +107,19 @@ const trimWordsToMaxChars = (words: string[], maxChars: number) => {
   return nextWords;
 };
 
+const isTouchLandscape = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const hasTouch =
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
+    "ontouchstart" in window ||
+    window.matchMedia?.("(pointer: coarse)").matches;
+
+  return hasTouch && window.innerWidth >= window.innerHeight;
+};
+
 const MediaTranscript: React.FC<{
   projectId: ProjectId;
   width?: number | string;
@@ -130,6 +143,8 @@ const MediaTranscript: React.FC<{
   const [interimWords, setInterimWords] = useState<string[]>([]);
   const [restartToken, setRestartToken] = useState(0);
   const [maxVisibleChars, setMaxVisibleChars] = useState(240);
+  const [isOrbLikeView, setIsOrbLikeView] = useState(false);
+  const [isTouchLandscapeOrbView, setIsTouchLandscapeOrbView] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -148,6 +163,29 @@ const MediaTranscript: React.FC<{
     setFinalWords([]);
     setInterimWords([]);
   }, [imageKey, projectId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncViewMode = () => {
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get("view");
+      const nextIsOrbLikeView = view === "orb" || view === "orb3d";
+      setIsOrbLikeView(nextIsOrbLikeView);
+      setIsTouchLandscapeOrbView(nextIsOrbLikeView && isTouchLandscape());
+    };
+
+    syncViewMode();
+    const intervalId = window.setInterval(syncViewMode, 500);
+    window.addEventListener("resize", syncViewMode);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("resize", syncViewMode);
+    };
+  }, [pathname]);
 
   useEffect(() => {
     const viewport = transcriptViewportRef.current;
@@ -480,12 +518,36 @@ const MediaTranscript: React.FC<{
 
   return (
     <div
-      className="fixed bottom-2 left-1/2 z-[1100] -translate-x-1/2 rounded-md border-2 border-white bg-black/75 p-2 text-white shadow-md"
-      style={{ width, minHeight: height }}
+      className="fixed z-[200] rounded-md border-2 border-white bg-black/75 p-2 text-white shadow-md"
+      style={
+        isOrbLikeView
+          ? {
+              top: "calc(50% + var(--overlay-transcript-vertical, 0px))",
+              right: isTouchLandscapeOrbView
+                ? undefined
+                : "var(--overlay-transcript-right, 30px)",
+              left: isTouchLandscapeOrbView
+                ? "var(--overlay-transcript-right, 30px)"
+                : undefined,
+              transform: "translateY(-50%) rotate(-90deg)",
+              transformOrigin: "center center",
+              width: isTouchLandscapeOrbView ? "80vh" : width,
+              minHeight: height,
+              border: "none",
+            }
+          : {
+              bottom: "var(--overlay-transcript-vertical, 8px)",
+              left: "50%",
+              transform:
+                "translateX(calc(-50% + var(--overlay-transcript-center-offset, 0px)))",
+              width,
+              minHeight: height,
+            }
+      }
     >
       <div
         ref={transcriptViewportRef}
-        className="h-9 overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 text-[14px] leading-7"
+        className="rotate-180 flex items-center h-14 overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 text-[14px] leading-7"
       >
         {displayWords.length === 0 && (
           <span className="text-white/70">Waiting for speech...</span>
@@ -494,18 +556,6 @@ const MediaTranscript: React.FC<{
           <span className="text-white">{displayWords.join(" ")}</span>
         )}
       </div>
-
-      {errorMessage && <div className="mt-1 text-[10px] text-[#ffd1d1]">{errorMessage}</div>}
-
-      {(status === "unsupported" || status === "error" || status === "no-audio-track") && (
-        <button
-          className="mt-1 rounded border border-white/40 px-2 py-1 text-[10px] uppercase tracking-[0.1em] text-white hover:bg-white hover:text-black"
-          onClick={() => setRestartToken((current) => current + 1)}
-          type="button"
-        >
-          Retry
-        </button>
-      )}
     </div>
   );
 };

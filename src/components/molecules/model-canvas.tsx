@@ -18,6 +18,7 @@ import GlassOrb3DProjection from "../atoms/glass-orb-3d-projection";
 import GlassOrbProjection, {
   DEFAULT_GLASS_ORB_SETTINGS,
   GlassOrbSettings,
+  OrbRotationSnapshot,
 } from "../atoms/glass-orb-projection";
 import {
   CONFIG,
@@ -43,6 +44,10 @@ const AUDIO_UNLOCK_SESSION_KEY = "streets_audio_unlocked";
 const ORB_AUTOPLAY_INTERVAL_MS = 2600;
 const ORB_AUTOPLAY_START_INDEX = 1;
 const ORB_AUTOPLAY_END_INDEX = 30;
+const ORB_AUTOPLAY_VIDEO_FALLBACK_MS = 8000;
+const ORB_SYNC_POLL_INTERVAL_MS = 300;
+const ORB_SYNC_CAMERA_SEND_INTERVAL_MS = 120;
+const ORB_SYNC_HEARTBEAT_INTERVAL_MS = 2000;
 
 declare global {
   interface Window {
@@ -205,31 +210,50 @@ const useActiveMediaTexture = (mediaUrl: string) => {
       videoElement.volume = 1;
       videoElement.autoplay = true;
       videoElement.playsInline = true;
+      videoElement.setAttribute("playsinline", "true");
+      videoElement.setAttribute("webkit-playsinline", "true");
       videoElement.preload = "auto";
       let hasAttemptedFallback = false;
       let audioUnlocked = isAudioUnlockRemembered();
+
+      const attemptPlayback = async (preferUnmuted: boolean) => {
+        if (disposed) {
+          return false;
+        }
+
+        if (preferUnmuted) {
+          videoElement.muted = false;
+          try {
+            await videoElement.play();
+            audioUnlocked = true;
+            rememberAudioUnlock();
+            return true;
+          } catch {
+            // Continue with muted fallback for Safari/iPad autoplay policy.
+          }
+        }
+
+        videoElement.muted = true;
+        audioUnlocked = false;
+        try {
+          await videoElement.play();
+        } catch {
+          // Keep paused if browser still blocks playback.
+        }
+
+        return false;
+      };
 
       const tryUnlockVideoAudio = () => {
         if (disposed) {
           return;
         }
 
-        if (audioUnlocked && !videoElement.muted) {
+        if (audioUnlocked && !videoElement.muted && !videoElement.paused) {
           return;
         }
 
-        videoElement.muted = false;
-        videoElement.play().catch(() => {
-          videoElement.muted = true;
-          audioUnlocked = false;
-        }).then(() => {
-          if (videoElement.muted) {
-            return;
-          }
-
-          audioUnlocked = true;
-          rememberAudioUnlock();
-        });
+        void attemptPlayback(true);
       };
 
       const handleUserInteractionForAudio = () => {
@@ -239,9 +263,7 @@ const useActiveMediaTexture = (mediaUrl: string) => {
       const setVideoSource = (nextSource: string) => {
         videoElement.src = nextSource;
         videoElement.load();
-        videoElement.play().catch(() => {
-          // Ignore autoplay blocking; the texture will animate once playback starts.
-        });
+        void attemptPlayback(audioUnlocked);
       };
 
       const handleVideoError = () => {
@@ -272,9 +294,6 @@ const useActiveMediaTexture = (mediaUrl: string) => {
       localTexture = videoTexture;
       setActiveTexture(videoTexture);
       setVideoSource(mediaUrl);
-      if (audioUnlocked) {
-        tryUnlockVideoAudio();
-      }
 
       const cleanupVideoEvents = () => {
         videoElement.removeEventListener("error", handleVideoError);
@@ -347,7 +366,10 @@ const useActiveMediaTexture = (mediaUrl: string) => {
 };
 
 const orbControlRanges: Array<{
-  id: keyof Pick<GlassOrbSettings, "radius" | "yaw" | "xRotation">;
+  id: keyof Pick<
+    GlassOrbSettings,
+    "radius" | "yaw" | "xRotation" | "zRotation" | "xOffset" | "yOffset"
+  >;
   label: string;
   min: number;
   max: number;
@@ -357,15 +379,36 @@ const orbControlRanges: Array<{
   {
     id: "yaw",
     label: "Y Rotation",
-    min: -Math.PI,
-    max: Math.PI,
+    min: -Math.PI * 2,
+    max: Math.PI * 2,
     step: 0.01,
   },
   {
     id: "xRotation",
     label: "X Rotation",
-    min: -Math.PI / 4,
-    max: Math.PI / 4,
+    min: -Math.PI,
+    max: Math.PI,
+    step: 0.01,
+  },
+  {
+    id: "zRotation",
+    label: "Z Rotation",
+    min: -Math.PI * 2,
+    max: Math.PI * 2,
+    step: 0.01,
+  },
+  {
+    id: "xOffset",
+    label: "X Position",
+    min: -2.5,
+    max: 2.5,
+    step: 0.01,
+  },
+  {
+    id: "yOffset",
+    label: "Y Position",
+    min: -2.5,
+    max: 2.5,
     step: 0.01,
   },
 ];
@@ -375,9 +418,22 @@ type CameraOption = {
   label: string;
 };
 
+type OverlayLayoutSettings = {
+  mapRight: number;
+  mapVertical: number;
+  transcriptRight: number;
+  transcriptVertical: number;
+  transcriptCenterOffset: number;
+};
+
 const OrbControls: React.FC<{
   settings: GlassOrbSettings;
   onChange: React.Dispatch<React.SetStateAction<GlassOrbSettings>>;
+  onHide: () => void;
+  overlayLayoutSettings: OverlayLayoutSettings;
+  onOverlayLayoutSettingsChange: React.Dispatch<
+    React.SetStateAction<OverlayLayoutSettings>
+  >;
   cameraEnabled: boolean;
   onCameraEnabledChange: React.Dispatch<React.SetStateAction<boolean>>;
   cameraBackdropEnabled: boolean;
@@ -399,13 +455,23 @@ const OrbControls: React.FC<{
   onFlipXChange: React.Dispatch<React.SetStateAction<boolean>>;
   flipY: boolean;
   onFlipYChange: React.Dispatch<React.SetStateAction<boolean>>;
-  debugEnabled: boolean;
-  onDebugEnabledChange: React.Dispatch<React.SetStateAction<boolean>>;
+  listenerMode: boolean;
+  onListenerModeChange: (enabled: boolean) => void;
+  isBroadcaster: boolean;
+  activeBroadcasterId: string | null;
+  syncWarning: string | null;
+  remotePointerControlEnabled: boolean;
+  onRemotePointerControlEnabledChange: (enabled: boolean) => void;
+  isFullscreen: boolean;
+  onFullscreenToggle: () => void;
   autoplayEnabled: boolean;
   onAutoplayEnabledChange: (enabled: boolean) => void;
 }> = ({
   settings,
   onChange,
+  onHide,
+  overlayLayoutSettings,
+  onOverlayLayoutSettingsChange,
   cameraEnabled,
   onCameraEnabledChange,
   cameraBackdropEnabled,
@@ -423,24 +489,98 @@ const OrbControls: React.FC<{
   onFlipXChange,
   flipY,
   onFlipYChange,
-  debugEnabled,
-  onDebugEnabledChange,
+  listenerMode,
+  onListenerModeChange,
+  isBroadcaster,
+  activeBroadcasterId,
+  syncWarning,
+  remotePointerControlEnabled,
+  onRemotePointerControlEnabledChange,
+  isFullscreen,
+  onFullscreenToggle,
   autoplayEnabled,
   onAutoplayEnabledChange,
 }) => {
   return (
-    <div className="fixed bottom-4 left-4 z-20 w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-white/15 bg-black/70 p-4 text-xs text-white backdrop-blur-md">
-      <div className="mb-3">
-        <p className="font-semibold uppercase tracking-[0.2em] text-white/75">
-          Orb Controller
-        </p>
-        <p className="mt-1 text-white/60">
-          Move the mouse to steer the orb across X/Y. Rotation is smoothed for
-          a softer, gliding feel. Press C to hide/show this panel. Press H to
-          hide/show this panel and tracking debug together.
-        </p>
-      </div>
-      <div className="space-y-3">
+    <div className="fixed bottom-4 left-4 top-4 z-[11000] w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-white/15 bg-black/70 text-xs text-white backdrop-blur-md">
+      <div
+        className="h-full space-y-3 overflow-y-auto p-4 pr-3"
+        style={{
+          WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
+          touchAction: "pan-y",
+        }}
+      >
+        <div className="mb-3">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="font-semibold uppercase tracking-[0.2em] text-white/75">
+              Orb Controller
+            </p>
+            <button
+              aria-label="Hide orb controller"
+              className="rounded-md border border-white/25 px-2 py-1 text-[11px] font-semibold text-white/90 transition hover:bg-white hover:text-black"
+              onClick={onHide}
+              type="button"
+            >
+              ◀
+            </button>
+          </div>
+          <p className="mt-1 text-white/60">
+            Move the mouse to steer the orb across X/Y. Rotation is smoothed for
+            a softer, gliding feel. Press C to hide/show this panel. Press H to
+            hide/show this panel and overlays together.
+          </p>
+        </div>
+        <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
+            Display
+          </p>
+          <button
+            className="w-full rounded-md border border-white/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-white transition hover:bg-white hover:text-black"
+            onClick={onFullscreenToggle}
+            type="button"
+          >
+            {isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+          </button>
+        </div>
+        <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
+            Sync Role
+          </p>
+          <button
+            className="w-full rounded-md border border-white/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-white transition hover:bg-white hover:text-black"
+            onClick={() => onListenerModeChange(!listenerMode)}
+            type="button"
+          >
+            {listenerMode ? "Switch to Broadcaster" : "Switch to Listener"}
+          </button>
+          <p className="text-[11px] text-white/75">
+            Role: {listenerMode ? "Listener" : "Broadcaster"}
+          </p>
+          {!listenerMode && (
+            <p className="text-[11px] text-white/60">
+              Broadcast status: {isBroadcaster ? "Active" : "Waiting"}
+            </p>
+          )}
+          {listenerMode && (
+            <p className="text-[11px] text-white/60">
+              Broadcaster: {activeBroadcasterId ?? "Not found"}
+            </p>
+          )}
+          {syncWarning && (
+            <p className="text-[11px] font-medium text-[#ffaeae]">{syncWarning}</p>
+          )}
+          <label className="flex items-center gap-2 text-[11px] text-white/75">
+            <input
+              checked={remotePointerControlEnabled}
+              onChange={(event) =>
+                onRemotePointerControlEnabledChange(event.target.checked)
+              }
+              type="checkbox"
+            />
+            Enable mouse rotation override
+          </label>
+        </div>
         <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
             Orb Autoplay
@@ -485,6 +625,71 @@ const OrbControls: React.FC<{
         ))}
         <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
+            Overlay Position
+          </p>
+          {[
+            {
+              id: "mapRight" as const,
+              label: "Map Right",
+              min: -60,
+              max: 520,
+              step: 1,
+            },
+            {
+              id: "mapVertical" as const,
+              label: "Map Vertical",
+              min: -320,
+              max: 320,
+              step: 1,
+            },
+            {
+              id: "transcriptRight" as const,
+              label: "Transcript Right",
+              min: -35,
+              max: 520,
+              step: 1,
+            },
+            {
+              id: "transcriptVertical" as const,
+              label: "Transcript Vertical",
+              min: -320,
+              max: 320,
+              step: 1,
+            },
+            {
+              id: "transcriptCenterOffset" as const,
+              label: "Transcript X Offset",
+              min: -30,
+              max: 420,
+              step: 1,
+            },
+          ].map(({ id, label, min, max, step }) => (
+            <label className="block" key={id}>
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <span>{label}</span>
+                <span className="font-mono text-[11px] text-white/70">
+                  {Math.round(overlayLayoutSettings[id])}px
+                </span>
+              </div>
+              <input
+                className="w-full accent-white"
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={overlayLayoutSettings[id]}
+                onChange={(event) =>
+                  onOverlayLayoutSettingsChange((current) => ({
+                    ...current,
+                    [id]: parseFloat(event.target.value),
+                  }))
+                }
+              />
+            </label>
+          ))}
+        </div>
+        <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
             Tracking Camera
           </p>
           <button
@@ -525,14 +730,6 @@ const OrbControls: React.FC<{
                 type="checkbox"
               />
               Flip Y
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                checked={debugEnabled}
-                onChange={(event) => onDebugEnabledChange(event.target.checked)}
-                type="checkbox"
-              />
-              Debug Camera Canvas
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -614,46 +811,6 @@ const OrbControls: React.FC<{
   );
 };
 
-const OrbFullscreenButton: React.FC = () => {
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  useEffect(() => {
-    const syncFullscreen = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
-    };
-
-    syncFullscreen();
-    document.addEventListener("fullscreenchange", syncFullscreen);
-
-    return () => {
-      document.removeEventListener("fullscreenchange", syncFullscreen);
-    };
-  }, []);
-
-  const handleToggleFullscreen = async () => {
-    if (typeof document === "undefined") {
-      return;
-    }
-
-    if (!document.fullscreenElement) {
-      await document.documentElement.requestFullscreen();
-      return;
-    }
-
-    await document.exitFullscreen();
-  };
-
-  return (
-    <button
-      className="fixed right-4 top-4 z-20 rounded-full border border-white/15 bg-black/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white backdrop-blur-md"
-      onClick={handleToggleFullscreen}
-      type="button"
-    >
-      {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-    </button>
-  );
-};
-
 const OrbSubtitle: React.FC<{
   projectId: ProjectId;
   currentModel: number;
@@ -717,38 +874,76 @@ const EquirectangularView: React.FC<{
       return;
     }
 
+    const attemptPlayback = async (preferUnmuted: boolean) => {
+      const target = videoRef.current;
+      if (!target) {
+        return false;
+      }
+
+      if (preferUnmuted) {
+        target.muted = false;
+        setVideoMuted(false);
+        try {
+          await target.play();
+          setVideoMuted(false);
+          rememberAudioUnlock();
+          return true;
+        } catch {
+          // Continue with muted fallback for Safari/iPad autoplay policy.
+        }
+      }
+
+      target.muted = true;
+      setVideoMuted(true);
+      try {
+        await target.play();
+      } catch {
+        // Keep paused if browser still blocks playback.
+      }
+
+      return false;
+    };
+
     const unlockAudio = () => {
-      setVideoMuted(false);
       const target = videoRef.current;
       if (!target) {
         return;
       }
 
-      target.muted = false;
-      target
-        .play()
-        .catch(() => {
-          target.muted = true;
-          setVideoMuted(true);
-        })
-        .then(() => {
-          if (target.muted) {
-            return;
-          }
+      if (!target.paused && !target.muted) {
+        return;
+      }
 
-          setVideoMuted(false);
-          rememberAudioUnlock();
-        });
+      void attemptPlayback(true);
     };
+
+    const syncInlinePlaybackAttributes = () => {
+      const target = videoRef.current;
+      if (!target) {
+        return;
+      }
+
+      target.setAttribute("playsinline", "true");
+      target.setAttribute("webkit-playsinline", "true");
+    };
+
+    const tryStartPlayback = () => {
+      void attemptPlayback(isAudioUnlockRemembered());
+    };
+
+    syncInlinePlaybackAttributes();
+    tryStartPlayback();
+    const target = videoRef.current;
+    target?.addEventListener("loadedmetadata", tryStartPlayback);
+    target?.addEventListener("canplay", tryStartPlayback);
 
     window.addEventListener("pointerdown", unlockAudio);
     window.addEventListener("keydown", unlockAudio);
     window.addEventListener("touchstart", unlockAudio);
-    if (isAudioUnlockRemembered()) {
-      unlockAudio();
-    }
 
     return () => {
+      target?.removeEventListener("loadedmetadata", tryStartPlayback);
+      target?.removeEventListener("canplay", tryStartPlayback);
       window.removeEventListener("pointerdown", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
       window.removeEventListener("touchstart", unlockAudio);
@@ -822,6 +1017,9 @@ const ProjectScene: React.FC<{
   trackedSubjects: TrackedSubject[];
   headFollowPositionEnabled: boolean;
   headFollowPositionStrength: number;
+  listenerMode: boolean;
+  remotePointerControlEnabled: boolean;
+  remoteOrbRotation: OrbRotationSnapshot | null;
   sphereDefaultRotationOffset: number;
 }> = ({
   projectId,
@@ -837,6 +1035,9 @@ const ProjectScene: React.FC<{
   trackedSubjects,
   headFollowPositionEnabled,
   headFollowPositionStrength,
+  listenerMode,
+  remotePointerControlEnabled,
+  remoteOrbRotation,
   sphereDefaultRotationOffset,
 }) => {
   const textureIndex = (doubleBy ? doubleBy + currentModel : currentModel) - 1;
@@ -863,8 +1064,9 @@ const ProjectScene: React.FC<{
           trackedSubjects={trackedSubjects}
           headFollowPositionEnabled={headFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
-          listenerMode={false}
-          remoteRotation={null}
+          listenerMode={listenerMode}
+          allowPointerControlInListenerMode={remotePointerControlEnabled}
+          remoteRotation={remoteOrbRotation}
           onRotationChange={() => {}}
         />
       ) : orbMode ? (
@@ -874,8 +1076,9 @@ const ProjectScene: React.FC<{
           trackedSubjects={trackedSubjects}
           headFollowPositionEnabled={headFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
-          listenerMode={false}
-          remoteRotation={null}
+          listenerMode={listenerMode}
+          allowPointerControlInListenerMode={remotePointerControlEnabled}
+          remoteRotation={remoteOrbRotation}
           onRotationChange={() => {}}
         />
       ) : (
@@ -883,44 +1086,48 @@ const ProjectScene: React.FC<{
           <ModelEnv
             rotation={[0, Math.PI / 2 + sphereDefaultRotationOffset, 0]}
             texture={activeTexture}
-            scale={scale ?? [-1, 1, 1]}
+            scale={scale ?? [-1, -1, 1]}
           />
           {withSubtitle && CONFIG[projectId].text[currentModel] && (
             <SubtitleText>{CONFIG[projectId].text[currentModel]}</SubtitleText>
           )}
         </>
       )}
-      {/* Arrows to navigate */}
-      {Object.keys(CONFIG[projectId].arrows).includes(
-        currentModel.toString(),
-      ) ? (
-        CONFIG[projectId].arrows[currentModel].map(
-          ([direction, value, tooltip], idx) => {
-            return (
-              <Move
-                direction={direction}
-                value={value}
-                tooltip={tooltip}
-                {...moveProps}
-                key={idx}
-              />
-            );
-          },
-        )
-      ) : (
+      {!isOrbVisualMode && (
         <>
-          <Move
-            direction={"reverse"}
-            value={-1}
-            tooltip={null}
-            {...moveProps}
-          />
-          <Move
-            direction={"forward"}
-            value={1}
-            tooltip={null}
-            {...moveProps}
-          />
+          {/* Arrows to navigate */}
+          {Object.keys(CONFIG[projectId].arrows).includes(
+            currentModel.toString(),
+          ) ? (
+            CONFIG[projectId].arrows[currentModel].map(
+              ([direction, value, tooltip], idx) => {
+                return (
+                  <Move
+                    direction={direction}
+                    value={value}
+                    tooltip={tooltip}
+                    {...moveProps}
+                    key={idx}
+                  />
+                );
+              },
+            )
+          ) : (
+            <>
+              <Move
+                direction={"reverse"}
+                value={-1}
+                tooltip={null}
+                {...moveProps}
+              />
+              <Move
+                direction={"forward"}
+                value={1}
+                tooltip={null}
+                {...moveProps}
+              />
+            </>
+          )}
         </>
       )}
       {!isOrbVisualMode && <OrbitControls maxDistance={5} />}
@@ -959,13 +1166,20 @@ const ModelCanvas: React.FC<{
   const [orbSettings, setOrbSettings] = useState<GlassOrbSettings>(
     DEFAULT_GLASS_ORB_SETTINGS,
   );
-  const [showOrbControls, setShowOrbControls] = useState(true);
+  const [overlayLayoutSettings, setOverlayLayoutSettings] =
+    useState<OverlayLayoutSettings>({
+      mapRight: -50,
+      mapVertical: 8,
+      transcriptRight: -35,
+      transcriptVertical: 0,
+      transcriptCenterOffset: -30,
+    });
+  const [showOrbControls, setShowOrbControls] = useState(false);
   const [trackedSubjects, setTrackedSubjects] = useState<TrackedSubject[]>([]);
   const [trackingCameraEnabled, setTrackingCameraEnabled] = useState(false);
   const [trackingCameraDeviceId, setTrackingCameraDeviceId] = useState("");
   const [trackingFlipX, setTrackingFlipX] = useState(false);
   const [trackingFlipY, setTrackingFlipY] = useState(false);
-  const [trackingDebugEnabled, setTrackingDebugEnabled] = useState(true);
   const [trackingBackdropEnabled, setTrackingBackdropEnabled] = useState(true);
   const [trackingBackdropOpacity, setTrackingBackdropOpacity] = useState(0.66);
   const [headFollowPositionEnabled, setHeadFollowPositionEnabled] =
@@ -975,10 +1189,58 @@ const ModelCanvas: React.FC<{
   const [hideOrbHud, setHideOrbHud] = useState(false);
   const [cameraOptions, setCameraOptions] = useState<CameraOption[]>([]);
   const [orbAutoplayEnabled, setOrbAutoplayEnabledState] = useState(true);
+  const orbClientIdRef = useRef(
+    `orb-${Math.random().toString(36).slice(2, 10)}`,
+  );
+  const [listenerMode, setListenerMode] = useState(false);
+  const [isBroadcaster, setIsBroadcaster] = useState(false);
+  const [activeBroadcasterId, setActiveBroadcasterId] = useState<string | null>(
+    null,
+  );
+  const [remoteOrbRotation, setRemoteOrbRotation] =
+    useState<OrbRotationSnapshot | null>(null);
+  const [activeVideoDurationMs, setActiveVideoDurationMs] = useState<
+    number | null
+  >(null);
+  const [remotePointerControlEnabled, setRemotePointerControlEnabled] =
+    useState(false);
+  const [orbSyncError, setOrbSyncError] = useState<string | null>(null);
+  const [orbRoleWarning, setOrbRoleWarning] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const activeTrackedSubjectRef = useRef<TrackedSubject | null>(null);
 
   useEffect(() => {
     setCurrentModel(parseInt(currentIndexToPathname));
+    setShowOrbControls(false);
   }, [currentIndexToPathname]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const root = document.documentElement;
+    root.style.setProperty(
+      "--overlay-map-right",
+      `${overlayLayoutSettings.mapRight}px`,
+    );
+    root.style.setProperty(
+      "--overlay-map-vertical",
+      `${overlayLayoutSettings.mapVertical}px`,
+    );
+    root.style.setProperty(
+      "--overlay-transcript-right",
+      `${overlayLayoutSettings.transcriptRight}px`,
+    );
+    root.style.setProperty(
+      "--overlay-transcript-vertical",
+      `${overlayLayoutSettings.transcriptVertical}px`,
+    );
+    root.style.setProperty(
+      "--overlay-transcript-center-offset",
+      `${overlayLayoutSettings.transcriptCenterOffset}px`,
+    );
+  }, [overlayLayoutSettings]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1006,12 +1268,79 @@ const ModelCanvas: React.FC<{
     setOrbAutoplayEnabledState(params.get("autoplay") !== "off");
   }, [pathname]);
 
+  const handleToggleFullscreen = useCallback(async () => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const doc = document as Document & {
+      webkitExitFullscreen?: () => Promise<void> | void;
+      webkitFullscreenElement?: Element | null;
+    };
+    const root = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+
+    const fullscreenActive = Boolean(
+      doc.fullscreenElement || doc.webkitFullscreenElement,
+    );
+
+    try {
+      if (fullscreenActive) {
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        }
+        return;
+      }
+
+      if (root.requestFullscreen) {
+        await root.requestFullscreen();
+      } else if (root.webkitRequestFullscreen) {
+        await root.webkitRequestFullscreen();
+      }
+    } catch {
+      // Ignore failed fullscreen requests from browser policy restrictions.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const syncFullscreen = () => {
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element | null;
+      };
+      setIsFullscreen(
+        Boolean(doc.fullscreenElement || doc.webkitFullscreenElement),
+      );
+    };
+
+    syncFullscreen();
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    document.addEventListener(
+      "webkitfullscreenchange",
+      syncFullscreen as EventListener,
+    );
+
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+      document.removeEventListener(
+        "webkitfullscreenchange",
+        syncFullscreen as EventListener,
+      );
+    };
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined" || !isRestrictedUiAllowed) {
       return;
     }
 
-    const handleFullscreenToggle = async (event: KeyboardEvent) => {
+    const handleFullscreenHotkey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTypingTarget =
         target?.tagName === "INPUT" ||
@@ -1027,44 +1356,14 @@ const ModelCanvas: React.FC<{
       }
 
       event.preventDefault();
-
-      const doc = document as Document & {
-        webkitExitFullscreen?: () => Promise<void> | void;
-        webkitFullscreenElement?: Element | null;
-      };
-      const root = document.documentElement as HTMLElement & {
-        webkitRequestFullscreen?: () => Promise<void> | void;
-      };
-
-      const isFullscreen = Boolean(
-        doc.fullscreenElement || doc.webkitFullscreenElement,
-      );
-
-      try {
-        if (isFullscreen) {
-          if (doc.exitFullscreen) {
-            await doc.exitFullscreen();
-          } else if (doc.webkitExitFullscreen) {
-            await doc.webkitExitFullscreen();
-          }
-          return;
-        }
-
-        if (root.requestFullscreen) {
-          await root.requestFullscreen();
-        } else if (root.webkitRequestFullscreen) {
-          await root.webkitRequestFullscreen();
-        }
-      } catch {
-        // Ignore failed fullscreen requests from browser policy restrictions.
-      }
+      void handleToggleFullscreen();
     };
 
-    window.addEventListener("keydown", handleFullscreenToggle);
+    window.addEventListener("keydown", handleFullscreenHotkey);
     return () => {
-      window.removeEventListener("keydown", handleFullscreenToggle);
+      window.removeEventListener("keydown", handleFullscreenHotkey);
     };
-  }, [isRestrictedUiAllowed]);
+  }, [handleToggleFullscreen, isRestrictedUiAllowed]);
 
   const moveProps = {
     projectId: projectId,
@@ -1078,6 +1377,16 @@ const ModelCanvas: React.FC<{
   const textureIndex = (doubleBy ? doubleBy + currentModel : currentModel) - 1;
   const activeMediaUrl =
     mediaUrls[Math.min(Math.max(textureIndex, 0), mediaUrls.length - 1)];
+  const isOrbMode = viewMode === "orb";
+  const isOrb3DMode = viewMode === "orb3d";
+  const isOrbLikeMode = isOrbMode || isOrb3DMode;
+  const isEquirectMode = viewMode === "equirect";
+  const showOrbUi = isRestrictedUiAllowed && isOrbLikeMode && !doubleBy;
+  const showEquirectUi = isRestrictedUiAllowed && isEquirectMode && !doubleBy;
+  const shouldHideSecondaryOrbCanvas =
+    isRestrictedUiAllowed &&
+    (isOrbLikeMode || isEquirectMode) &&
+    typeof doubleBy === "number";
 
   // Two Columns Style
   const [isSmallScreen, setIsSmallScreen] = useState(false);
@@ -1090,6 +1399,108 @@ const ModelCanvas: React.FC<{
       return () => window.removeEventListener("resize", handleResize);
     }
   }, []);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !showOrbUi ||
+      !isOrbLikeMode ||
+      !isVideoMediaUrl(activeMediaUrl)
+    ) {
+      setActiveVideoDurationMs(null);
+      return;
+    }
+
+    let disposed = false;
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.crossOrigin = "anonymous";
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+
+    const fallbackMediaUrl = getLocalAssetFallbackPath(activeMediaUrl);
+    const candidateSources = [activeMediaUrl, fallbackMediaUrl]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .filter((value, index, all) => all.indexOf(value) === index);
+
+    let sourceIndex = 0;
+    let timeoutId: number | null = null;
+
+    const cleanup = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      video.removeEventListener("error", handleError);
+      video.pause();
+      video.src = "";
+      video.load();
+    };
+
+    const finalizeWithFallback = () => {
+      if (disposed) {
+        return;
+      }
+      setActiveVideoDurationMs(ORB_AUTOPLAY_VIDEO_FALLBACK_MS);
+    };
+
+    const handleLoadedMetadata = () => {
+      if (disposed) {
+        return;
+      }
+
+      const durationSeconds = Number(video.duration);
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+        finalizeWithFallback();
+        return;
+      }
+
+      setActiveVideoDurationMs(Math.ceil(durationSeconds * 1000));
+    };
+
+    const loadCandidateSource = (source: string) => {
+      video.src = source;
+      video.load();
+    };
+
+    const handleError = () => {
+      if (disposed) {
+        return;
+      }
+
+      sourceIndex += 1;
+      if (sourceIndex >= candidateSources.length) {
+        finalizeWithFallback();
+        return;
+      }
+
+      loadCandidateSource(candidateSources[sourceIndex]);
+    };
+
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    video.addEventListener("error", handleError);
+
+    if (!candidateSources.length) {
+      finalizeWithFallback();
+      return () => {
+        disposed = true;
+        cleanup();
+      };
+    }
+
+    timeoutId = window.setTimeout(() => {
+      finalizeWithFallback();
+    }, 8000);
+
+    loadCandidateSource(candidateSources[sourceIndex]);
+
+    return () => {
+      disposed = true;
+      cleanup();
+    };
+  }, [activeMediaUrl, isOrbLikeMode, showOrbUi]);
 
   useEffect(() => {
     if (
@@ -1164,16 +1575,6 @@ const ModelCanvas: React.FC<{
     }
   }
 
-  const isOrbMode = viewMode === "orb";
-  const isOrb3DMode = viewMode === "orb3d";
-  const isOrbLikeMode = isOrbMode || isOrb3DMode;
-  const isEquirectMode = viewMode === "equirect";
-  const showOrbUi = isRestrictedUiAllowed && isOrbLikeMode && !doubleBy;
-  const showEquirectUi = isRestrictedUiAllowed && isEquirectMode && !doubleBy;
-  const shouldHideSecondaryOrbCanvas =
-    isRestrictedUiAllowed &&
-    (isOrbLikeMode || isEquirectMode) &&
-    typeof doubleBy === "number";
   const sphereDefaultRotationOffset = useMemo(() => {
     const projectConfig = CONFIG[projectId];
     const locationByKey = projectConfig.location;
@@ -1244,6 +1645,11 @@ const ModelCanvas: React.FC<{
       return;
     }
 
+    const isVideoAutoplayStep = isVideoMediaUrl(activeMediaUrl);
+    const autoplayDelayMs = isVideoAutoplayStep
+      ? Math.max(activeVideoDurationMs ?? ORB_AUTOPLAY_VIDEO_FALLBACK_MS, 400)
+      : ORB_AUTOPLAY_INTERVAL_MS;
+
     const timeoutId = window.setTimeout(() => {
       if (typeof window !== "undefined") {
         const params = new URLSearchParams(window.location.search);
@@ -1266,12 +1672,14 @@ const ModelCanvas: React.FC<{
 
       const query = window.location.search ?? "";
       router.replace(`/${projectId}/${nextModel.toString()}${query}`);
-    }, ORB_AUTOPLAY_INTERVAL_MS);
+    }, autoplayDelayMs);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
   }, [
+    activeMediaUrl,
+    activeVideoDurationMs,
     currentModel,
     isOrbLikeMode,
     maxOrbAutoplayIndex,
@@ -1279,6 +1687,268 @@ const ModelCanvas: React.FC<{
     projectId,
     router,
     showOrbUi,
+  ]);
+
+  const activeTrackedSubject = useMemo(
+    () =>
+      trackedSubjects.reduce<TrackedSubject | null>((best, subject) => {
+        if (!best) {
+          return subject;
+        }
+
+        if (subject.confidence === best.confidence) {
+          return subject.lastUpdated > best.lastUpdated ? subject : best;
+        }
+
+        return subject.confidence > best.confidence ? subject : best;
+      }, null),
+    [trackedSubjects],
+  );
+
+  useEffect(() => {
+    activeTrackedSubjectRef.current = activeTrackedSubject;
+  }, [activeTrackedSubject]);
+
+  const handleListenerModeChange = useCallback((enabled: boolean) => {
+    setListenerMode(enabled);
+    setOrbRoleWarning(null);
+    setOrbSyncError(null);
+    if (enabled) {
+      setIsBroadcaster(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !showOrbUi || !isOrbLikeMode) {
+      return;
+    }
+
+    let disposed = false;
+
+    const pollSyncSnapshot = async () => {
+      try {
+        const response = await fetch("/api/orb-sync", {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error("Failed to fetch orb sync snapshot.");
+        }
+
+        const payload = (await response.json()) as {
+          broadcasterId?: string | null;
+          rotation?: { yaw?: number; xRotation?: number } | null;
+        };
+
+        if (disposed) {
+          return;
+        }
+
+        const broadcasterId =
+          typeof payload.broadcasterId === "string"
+            ? payload.broadcasterId
+            : null;
+        const isSelfBroadcaster = broadcasterId === orbClientIdRef.current;
+        const shouldUseRemoteRotation = listenerMode || isSelfBroadcaster;
+
+        setActiveBroadcasterId(broadcasterId);
+        setIsBroadcaster(isSelfBroadcaster);
+
+        if (shouldUseRemoteRotation) {
+          const yaw = payload.rotation?.yaw;
+          const xRotation = payload.rotation?.xRotation;
+          if (Number.isFinite(yaw) && Number.isFinite(xRotation)) {
+            setRemoteOrbRotation({
+              yaw: yaw as number,
+              xRotation: xRotation as number,
+            });
+          } else {
+            setRemoteOrbRotation(null);
+          }
+        } else {
+          setRemoteOrbRotation(null);
+        }
+
+        setOrbSyncError(null);
+      } catch {
+        if (disposed) {
+          return;
+        }
+
+        setOrbSyncError("Sync server unavailable.");
+        setRemoteOrbRotation(null);
+      }
+    };
+
+    void pollSyncSnapshot();
+    const intervalId = window.setInterval(() => {
+      void pollSyncSnapshot();
+    }, ORB_SYNC_POLL_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [isOrbLikeMode, listenerMode, showOrbUi]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !showOrbUi ||
+      !isOrbLikeMode ||
+      listenerMode
+    ) {
+      setIsBroadcaster(false);
+      return;
+    }
+
+    let disposed = false;
+    const clientId = orbClientIdRef.current;
+
+    const postOrbSyncAction = async (
+      action: "claim" | "heartbeat" | "release",
+    ) => {
+      const response = await fetch("/api/orb-sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+        body: JSON.stringify({
+          action,
+          clientId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed orb sync action.");
+      }
+
+      return response.json();
+    };
+
+    const claimBroadcaster = async () => {
+      try {
+        const payload = (await postOrbSyncAction("claim")) as {
+          ok?: boolean;
+          broadcasterId?: string | null;
+        };
+
+        if (disposed) {
+          return;
+        }
+
+        const broadcasterId =
+          typeof payload.broadcasterId === "string"
+            ? payload.broadcasterId
+            : null;
+        setActiveBroadcasterId(broadcasterId);
+
+        if (payload.ok) {
+          setIsBroadcaster(true);
+          setOrbRoleWarning(null);
+        } else {
+          setIsBroadcaster(false);
+          setOrbRoleWarning(
+            "Another broadcaster is active. Switch to listener or try again later.",
+          );
+        }
+
+        setOrbSyncError(null);
+      } catch {
+        if (disposed) {
+          return;
+        }
+
+        setIsBroadcaster(false);
+        setOrbSyncError("Sync server unavailable.");
+      }
+    };
+
+    void claimBroadcaster();
+
+    const heartbeatId = window.setInterval(() => {
+      void postOrbSyncAction("heartbeat")
+        .then(() => {
+          if (!disposed) {
+            setOrbSyncError(null);
+          }
+        })
+        .catch(() => {
+          if (!disposed) {
+            setOrbSyncError("Sync server unavailable.");
+          }
+        });
+    }, ORB_SYNC_HEARTBEAT_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(heartbeatId);
+      void postOrbSyncAction("release").catch(() => {});
+    };
+  }, [isOrbLikeMode, listenerMode, showOrbUi]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !showOrbUi ||
+      !isOrbLikeMode ||
+      listenerMode ||
+      !isBroadcaster ||
+      !trackingCameraEnabled
+    ) {
+      return;
+    }
+
+    let disposed = false;
+    const clientId = orbClientIdRef.current;
+
+    const sendCameraData = async () => {
+      const subject = activeTrackedSubjectRef.current;
+      if (!subject) {
+        return;
+      }
+
+      try {
+        await fetch("/api/orb-sync", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          cache: "no-store",
+          body: JSON.stringify({
+            action: "camera",
+            clientId,
+            x: subject.x,
+            y: subject.y,
+            confidence: subject.confidence,
+          }),
+        });
+
+        if (!disposed) {
+          setOrbSyncError(null);
+        }
+      } catch {
+        if (!disposed) {
+          setOrbSyncError("Sync server unavailable.");
+        }
+      }
+    };
+
+    void sendCameraData();
+    const intervalId = window.setInterval(() => {
+      void sendCameraData();
+    }, ORB_SYNC_CAMERA_SEND_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    isBroadcaster,
+    isOrbLikeMode,
+    listenerMode,
+    showOrbUi,
+    trackingCameraEnabled,
   ]);
 
   const currentMoves: DirectionTuple[] = Object.keys(CONFIG[projectId].arrows).includes(
@@ -1407,6 +2077,7 @@ const ModelCanvas: React.FC<{
       {isOrbLikeMode && <div className="fixed inset-0 z-0 bg-black" />}
       <Canvas
         className={className}
+        orthographic={isOrbLikeMode}
         style={{
           ...(isOrbLikeMode
             ? {
@@ -1429,8 +2100,10 @@ const ModelCanvas: React.FC<{
         camera={
           isOrbLikeMode
             ? {
-                position: isOrb3DMode ? [0, 0, 8.2] : [0, 0, 4.8],
-                fov: isOrb3DMode ? 62 : 55,
+                position: [0, 0, 12],
+                zoom: isOrb3DMode ? 74 : 118,
+                near: 0.1,
+                far: 1000,
               }
             : undefined
         }
@@ -1452,6 +2125,11 @@ const ModelCanvas: React.FC<{
               headFollowPositionEnabled && trackingCameraEnabled
             }
             headFollowPositionStrength={headFollowPositionStrength}
+            listenerMode={listenerMode || isBroadcaster}
+            remotePointerControlEnabled={remotePointerControlEnabled}
+            remoteOrbRotation={
+              listenerMode || isBroadcaster ? remoteOrbRotation : null
+            }
             sphereDefaultRotationOffset={sphereDefaultRotationOffset}
           />
         </Suspense>
@@ -1462,7 +2140,7 @@ const ModelCanvas: React.FC<{
         cameraDeviceId={trackingCameraDeviceId || undefined}
         flipX={trackingFlipX}
         flipY={trackingFlipY}
-        debugEnabled={trackingDebugEnabled && !hideOrbHud}
+        debugEnabled={false}
         cameraBackdropEnabled={trackingBackdropEnabled && trackingCameraEnabled}
         cameraBackdropOpacity={trackingBackdropOpacity}
         onSubjectsChange={setTrackedSubjects}
@@ -1470,11 +2148,23 @@ const ModelCanvas: React.FC<{
       {showOrbUi && withSubtitle && (
         <OrbSubtitle projectId={projectId} currentModel={currentModel} />
       )}
-      {showOrbUi && <OrbFullscreenButton />}
+      {showOrbUi && !showOrbControls && !hideOrbHud && (
+        <button
+          aria-label="Show orb controller"
+          className="fixed bottom-4 left-4 z-[11000] rounded-r-xl border border-white/20 bg-black/70 px-3 py-3 text-sm font-semibold text-white backdrop-blur-md transition hover:bg-white hover:text-black"
+          onClick={() => setShowOrbControls(true)}
+          type="button"
+        >
+          ▶
+        </button>
+      )}
       {showOrbUi && showOrbControls && !hideOrbHud && (
         <OrbControls
           settings={orbSettings}
           onChange={setOrbSettings}
+          onHide={() => setShowOrbControls(false)}
+          overlayLayoutSettings={overlayLayoutSettings}
+          onOverlayLayoutSettingsChange={setOverlayLayoutSettings}
           cameraEnabled={trackingCameraEnabled}
           onCameraEnabledChange={setTrackingCameraEnabled}
           cameraBackdropEnabled={trackingBackdropEnabled}
@@ -1492,8 +2182,17 @@ const ModelCanvas: React.FC<{
           onFlipXChange={setTrackingFlipX}
           flipY={trackingFlipY}
           onFlipYChange={setTrackingFlipY}
-          debugEnabled={trackingDebugEnabled}
-          onDebugEnabledChange={setTrackingDebugEnabled}
+          listenerMode={listenerMode}
+          onListenerModeChange={handleListenerModeChange}
+          isBroadcaster={isBroadcaster}
+          activeBroadcasterId={activeBroadcasterId}
+          syncWarning={orbSyncError ?? orbRoleWarning}
+          remotePointerControlEnabled={remotePointerControlEnabled}
+          onRemotePointerControlEnabledChange={setRemotePointerControlEnabled}
+          isFullscreen={isFullscreen}
+          onFullscreenToggle={() => {
+            void handleToggleFullscreen();
+          }}
           autoplayEnabled={orbAutoplayEnabled}
           onAutoplayEnabledChange={setOrbAutoplayEnabled}
         />

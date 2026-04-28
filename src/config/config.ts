@@ -411,6 +411,7 @@ export const CONFIG: Config = {
         ["left", 1, "Go to All Street"],],
       30: [["forward", -29, "Restart"]]
     },
+    mediaPrefixPath: 'streets_nyc_190426',
     supabaseMediaExtension: "mp4",
     location: {
       1: {

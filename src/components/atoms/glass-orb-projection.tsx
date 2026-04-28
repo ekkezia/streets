@@ -1,7 +1,7 @@
 "use client";
 
 import { useFrame } from "@react-three/fiber";
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { DoubleSide, Group, MathUtils, Quaternion, Texture, Vector3 } from "three";
 import type { TrackedSubject } from "./subject-presence";
 
@@ -9,6 +9,9 @@ export type GlassOrbSettings = {
   radius: number;
   yaw: number;
   xRotation: number;
+  zRotation: number;
+  xOffset: number;
+  yOffset: number;
 };
 
 export type OrbRotationSnapshot = {
@@ -17,17 +20,18 @@ export type OrbRotationSnapshot = {
 };
 
 export const DEFAULT_GLASS_ORB_SETTINGS: GlassOrbSettings = {
-  radius: 1.35,
+  radius: 2.2,
   yaw: 1.7,
-  xRotation: 0.1,
+  xRotation: -1.6,
+  zRotation: 6,
+  xOffset: 1.8,
+  yOffset: 0,
 };
 
 const POINTER_YAW_RANGE = Math.PI;
 const POINTER_TILT_RANGE = Math.PI;
 const ROTATION_SMOOTHING = 10;
 const POSITION_SMOOTHING = 8;
-const HEAD_MOVE_RANGE_X = 1.8;
-const HEAD_MOVE_RANGE_Y = 1.4;
 const HEAD_ROTATE_YAW_RANGE = Math.PI * 1.1;
 const HEAD_ROTATE_TILT_RANGE = Math.PI * 0.75;
 const MARKER_INPUT_GAIN_X = 2.35;
@@ -41,6 +45,7 @@ const GlassOrbProjection: React.FC<{
   headFollowPositionEnabled?: boolean;
   headFollowPositionStrength?: number;
   listenerMode?: boolean;
+  allowPointerControlInListenerMode?: boolean;
   remoteRotation?: OrbRotationSnapshot | null;
   onRotationChange?: (rotation: OrbRotationSnapshot) => void;
 }> = ({
@@ -50,14 +55,25 @@ const GlassOrbProjection: React.FC<{
   headFollowPositionEnabled = false,
   headFollowPositionStrength = 1,
   listenerMode = false,
+  allowPointerControlInListenerMode = false,
   remoteRotation = null,
   onRotationChange,
 }) => {
   const orbGroupRef = useRef<Group>(null);
   const currentYawRef = useRef(settings.yaw);
   const currentXRotationRef = useRef(settings.xRotation);
+  const currentZRotationRef = useRef(settings.zRotation);
   const currentPositionXRef = useRef(0);
   const currentPositionYRef = useRef(0);
+
+  useEffect(() => {
+    if (!orbGroupRef.current) {
+      return;
+    }
+
+    // Apply yaw first, then pitch, then roll so X/Z controls feel less coupled.
+    orbGroupRef.current.rotation.order = "YXZ";
+  }, []);
 
   const activeSubject = trackedSubjects.reduce<TrackedSubject | null>(
     (best, subject) => {
@@ -79,14 +95,24 @@ const GlassOrbProjection: React.FC<{
       return;
     }
 
-    let targetPositionX = 0;
-    let targetPositionY = 0;
+    let targetPositionX = settings.xOffset;
+    let targetPositionY = settings.yOffset;
     let targetYaw = settings.yaw;
     let targetXRotation = settings.xRotation;
+    let targetZRotation = settings.zRotation;
+    const pointerYawOffset = state.pointer.x * POINTER_YAW_RANGE;
+    const pointerTiltOffset = -state.pointer.y * POINTER_TILT_RANGE;
 
-    if (listenerMode && remoteRotation) {
-      targetYaw = remoteRotation.yaw;
-      targetXRotation = remoteRotation.xRotation;
+    if (listenerMode) {
+      if (remoteRotation) {
+        targetYaw = settings.yaw + remoteRotation.yaw;
+        targetXRotation = settings.xRotation + remoteRotation.xRotation;
+      }
+
+      if (allowPointerControlInListenerMode) {
+        targetYaw += pointerYawOffset;
+        targetXRotation += pointerTiltOffset;
+      }
     } else {
       let headYawOffset = 0;
       let headTiltOffset = 0;
@@ -96,18 +122,12 @@ const GlassOrbProjection: React.FC<{
         const normalizedY = 0.5 - MathUtils.clamp(activeSubject.y, 0, 1);
         const headStrength = MathUtils.clamp(headFollowPositionStrength, 0, 2.5);
 
-        targetPositionX =
-          normalizedX * settings.radius * HEAD_MOVE_RANGE_X * headStrength;
-        targetPositionY =
-          normalizedY * settings.radius * HEAD_MOVE_RANGE_Y * headStrength;
-
         headYawOffset = normalizedX * HEAD_ROTATE_YAW_RANGE * headStrength;
         headTiltOffset = normalizedY * HEAD_ROTATE_TILT_RANGE * headStrength;
       }
 
-      targetYaw = settings.yaw + state.pointer.x * POINTER_YAW_RANGE + headYawOffset;
-      targetXRotation =
-        settings.xRotation - state.pointer.y * POINTER_TILT_RANGE + headTiltOffset;
+      targetYaw = settings.yaw + pointerYawOffset + headYawOffset;
+      targetXRotation = settings.xRotation + pointerTiltOffset + headTiltOffset;
     }
 
     const alpha = 1 - Math.exp(-ROTATION_SMOOTHING * delta);
@@ -116,6 +136,11 @@ const GlassOrbProjection: React.FC<{
     currentXRotationRef.current = MathUtils.lerp(
       currentXRotationRef.current,
       targetXRotation,
+      alpha,
+    );
+    currentZRotationRef.current = MathUtils.lerp(
+      currentZRotationRef.current,
+      targetZRotation,
       alpha,
     );
 
@@ -133,7 +158,7 @@ const GlassOrbProjection: React.FC<{
     orbGroupRef.current.rotation.set(
       currentXRotationRef.current,
       currentYawRef.current,
-      0,
+      currentZRotationRef.current,
     );
     orbGroupRef.current.position.set(
       currentPositionXRef.current,
