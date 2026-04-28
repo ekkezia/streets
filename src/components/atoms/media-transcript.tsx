@@ -1,110 +1,64 @@
 "use client";
 
-import { CONFIG, ProjectId, SUPABASE_URL } from "@/config/config";
+import { CONFIG, ProjectId } from "@/config/config";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type SpeechRecognitionLike = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onresult: ((event: any) => void) | null;
-  onerror: ((event: any) => void) | null;
-  onend: (() => void) | null;
-  start: (track?: MediaStreamTrack) => void;
-  stop: () => void;
-};
+type TranscriptDictionary = Record<string, string>;
 
-type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
-
-declare global {
-  interface Window {
-    SpeechRecognition?: SpeechRecognitionCtor;
-    webkitSpeechRecognition?: SpeechRecognitionCtor;
-  }
-}
-
-type TranscriptStatus =
-  | "idle"
-  | "loading"
-  | "listening"
-  | "unsupported"
-  | "no-video"
-  | "no-audio-track"
-  | "error";
-
-const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg"];
-
-const stripQueryAndHash = (url: string) => url.split("#")[0].split("?")[0];
-
-const isVideoMediaUrl = (url: string) => {
-  const normalizedUrl = stripQueryAndHash(url).toLowerCase();
-  return VIDEO_EXTENSIONS.some((extension) => normalizedUrl.endsWith(extension));
+type MediaTranscriptProps = {
+  projectId: ProjectId;
+  width?: number | string;
+  height?: number;
 };
 
 const parseImageKeyFromPathname = (pathname: string): number => {
-  const parsed = Number.parseInt(pathname.split("/").filter(Boolean)[1] ?? "1", 10);
+  const segments = pathname.split("/").filter(Boolean);
+  const lastSegment = segments[segments.length - 1] ?? "1";
+  const parsed = Number.parseInt(lastSegment, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 };
 
-const getMediaPath = (projectId: ProjectId, index: number) => {
+const getAudioPath = (projectId: ProjectId, index: number) => {
   const projectConfig = CONFIG[projectId];
-  const perIndexMedia = projectConfig.mediaByIndex?.[index];
-  if (perIndexMedia) {
-    return perIndexMedia;
-  }
-
-  const extension = projectConfig.supabaseMediaExtension ?? "jpg";
   const prefix = projectConfig.mediaPrefixPath ?? projectConfig.supabasePrefixPath;
-
-  return (
-    SUPABASE_URL +
-    projectConfig.supabaseFolder +
-    "/" +
-    prefix +
-    "_" +
-    index +
-    "." +
-    extension
-  );
+  return `/assets/audio/${projectConfig.supabaseFolder}/${prefix}_${index}.m4a`;
 };
 
-const getLocalAssetFallbackPath = (mediaUrl: string) => {
-  if (!mediaUrl || mediaUrl.startsWith("data:") || mediaUrl.startsWith("blob:")) {
-    return null;
-  }
-
-  try {
-    const supabasePublicPath = new URL(SUPABASE_URL).pathname.replace(/\/+$/, "");
-    const mediaPath = new URL(mediaUrl, "http://localhost").pathname;
-    const normalizedMediaPath = mediaPath.replace(/\/+$/, "");
-
-    if (!normalizedMediaPath.startsWith(`${supabasePublicPath}/`)) {
-      return null;
-    }
-
-    const relativePath = normalizedMediaPath.slice(supabasePublicPath.length + 1);
-    if (!relativePath.length) {
-      return null;
-    }
-
-    return `/assets/${relativePath}`;
-  } catch {
-    return null;
-  }
+const getTranscriptJsonPath = (projectId: ProjectId) => {
+  return `/assets/transcriptions/${CONFIG[projectId].supabaseFolder}.json`;
 };
 
-const trimWordsToMaxChars = (words: string[], maxChars: number) => {
-  if (maxChars <= 0) {
-    return [];
+const normalizeTranscriptPayload = (payload: unknown): TranscriptDictionary => {
+  if (!payload || typeof payload !== "object") {
+    return {};
   }
 
-  const nextWords = words.filter(Boolean);
-  while (nextWords.length && nextWords.join(" ").length > maxChars) {
-    nextWords.shift();
+  const maybeWithTranscriptions = payload as { transcriptions?: unknown };
+  const rawMap =
+    maybeWithTranscriptions.transcriptions &&
+    typeof maybeWithTranscriptions.transcriptions === "object"
+      ? maybeWithTranscriptions.transcriptions
+      : payload;
+
+  const nextMap: TranscriptDictionary = {};
+  for (const [key, value] of Object.entries(rawMap as Record<string, unknown>)) {
+    if (typeof value === "string") {
+      nextMap[key] = value;
+    }
   }
 
-  return nextWords;
+  return nextMap;
+};
+
+const estimateDurationFromText = (text: string) => {
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (!wordCount) {
+    return 8;
+  }
+
+  const wordsPerSecond = 2.6;
+  return Math.max(6, Math.min(90, wordCount / wordsPerSecond));
 };
 
 const isTouchLandscape = () => {
@@ -120,49 +74,103 @@ const isTouchLandscape = () => {
   return hasTouch && window.innerWidth >= window.innerHeight;
 };
 
-const MediaTranscript: React.FC<{
-  projectId: ProjectId;
-  width?: number | string;
-  height?: number;
-  maxWords?: number;
-  language?: string;
-}> = ({
+const MediaTranscript: React.FC<MediaTranscriptProps> = ({
   projectId,
   width = "50vw",
-  height = 'fit-content',
-  maxWords = 10,
-  language = "en-US",
+  height = 84,
 }) => {
   const pathname = usePathname();
   const imageKey = useMemo(() => parseImageKeyFromPathname(pathname), [pathname]);
-  const mediaUrl = useMemo(() => getMediaPath(projectId, imageKey), [projectId, imageKey]);
+  const transcriptJsonPath = useMemo(
+    () => getTranscriptJsonPath(projectId),
+    [projectId],
+  );
+  const audioUrl = useMemo(() => getAudioPath(projectId, imageKey), [projectId, imageKey]);
 
-  const [status, setStatus] = useState<TranscriptStatus>("idle");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [finalWords, setFinalWords] = useState<string[]>([]);
-  const [interimWords, setInterimWords] = useState<string[]>([]);
-  const [restartToken, setRestartToken] = useState(0);
-  const [maxVisibleChars, setMaxVisibleChars] = useState(240);
   const [isOrbLikeView, setIsOrbLikeView] = useState(false);
   const [isTouchLandscapeOrbView, setIsTouchLandscapeOrbView] = useState(false);
+  const [transcriptionMap, setTranscriptionMap] = useState<TranscriptDictionary>({});
+  const [audioDurationSeconds, setAudioDurationSeconds] = useState(8);
+  const [layoutToken, setLayoutToken] = useState(0);
 
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const shouldRunRef = useRef(true);
+  const transcriptText = transcriptionMap[String(imageKey)] ?? "";
+
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
-  const maxVisibleCharsRef = useRef(maxVisibleChars);
+  const transcriptTextRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
-    maxVisibleCharsRef.current = maxVisibleChars;
-    setFinalWords((current) => trimWordsToMaxChars(current, maxVisibleChars));
-    setInterimWords((current) => trimWordsToMaxChars(current, maxVisibleChars));
-  }, [maxVisibleChars]);
+    let cancelled = false;
+
+    const loadTranscriptions = async () => {
+      try {
+        const response = await fetch(transcriptJsonPath);
+        if (!response.ok) {
+          throw new Error(`Failed to load transcription JSON: ${response.status}`);
+        }
+
+        const payload = (await response.json()) as unknown;
+        if (cancelled) {
+          return;
+        }
+
+        setTranscriptionMap(normalizeTranscriptPayload(payload));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error("Failed to load transcriptions", error);
+        setTranscriptionMap({});
+      }
+    };
+
+    loadTranscriptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [transcriptJsonPath]);
 
   useEffect(() => {
-    setFinalWords([]);
-    setInterimWords([]);
-  }, [imageKey, projectId]);
+    let cancelled = false;
+    const fallbackDuration = estimateDurationFromText(transcriptText);
+
+    const audioElement = document.createElement("audio");
+    audioElement.preload = "metadata";
+
+    const finalizeDuration = (durationSeconds: number) => {
+      if (cancelled) {
+        return;
+      }
+      setAudioDurationSeconds(Math.max(1, durationSeconds));
+    };
+
+    const handleLoadedMetadata = () => {
+      const durationSeconds = Number(audioElement.duration);
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+        finalizeDuration(fallbackDuration);
+        return;
+      }
+      finalizeDuration(durationSeconds);
+    };
+
+    const handleError = () => {
+      finalizeDuration(fallbackDuration);
+    };
+
+    audioElement.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audioElement.addEventListener("error", handleError);
+    audioElement.src = audioUrl;
+    audioElement.load();
+
+    return () => {
+      cancelled = true;
+      audioElement.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audioElement.removeEventListener("error", handleError);
+      audioElement.src = "";
+      audioElement.load();
+    };
+  }, [audioUrl, transcriptText]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -189,332 +197,51 @@ const MediaTranscript: React.FC<{
 
   useEffect(() => {
     const viewport = transcriptViewportRef.current;
-    if (!viewport || typeof ResizeObserver === "undefined") {
+    const text = transcriptTextRef.current;
+    if (!viewport || !text || typeof ResizeObserver === "undefined") {
       return;
     }
 
-    const updateMaxVisibleChars = () => {
-      const charsPerLine = Math.max(22, Math.floor(viewport.clientWidth / 7));
-      setMaxVisibleChars(charsPerLine);
-    };
+    const observer = new ResizeObserver(() => {
+      setLayoutToken((current) => current + 1);
+    });
 
-    updateMaxVisibleChars();
-    const observer = new ResizeObserver(updateMaxVisibleChars);
     observer.observe(viewport);
+    observer.observe(text);
 
     return () => {
       observer.disconnect();
     };
-  }, []);
+  }, [transcriptText]);
 
   useEffect(() => {
-    shouldRunRef.current = true;
-
-    const cleanup = () => {
-      shouldRunRef.current = false;
-
-      if (recognitionRef.current) {
-        recognitionRef.current.onresult = null;
-        recognitionRef.current.onerror = null;
-        recognitionRef.current.onend = null;
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // Ignore stop failures.
-        }
-        recognitionRef.current = null;
-      }
-
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
-
-      if (videoRef.current) {
-        videoRef.current.pause();
-        videoRef.current.src = "";
-        videoRef.current.load();
-        videoRef.current = null;
-      }
-    };
-
-    if (!isVideoMediaUrl(mediaUrl)) {
-      setStatus("no-video");
-      setErrorMessage(null);
-      cleanup();
-      return cleanup;
+    const viewport = transcriptViewportRef.current;
+    const text = transcriptTextRef.current;
+    if (!viewport || !text || !transcriptText.length) {
+      return;
     }
 
-    const RecognitionCtor =
-      window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    const offsetFromCenter = (viewport.clientWidth + text.scrollWidth) / 2;
+    const startX = offsetFromCenter;
+    const endX = -offsetFromCenter;
+    const animationDurationMs = Math.max(1000, audioDurationSeconds * 1000);
 
-    if (!RecognitionCtor) {
-      setStatus("unsupported");
-      setErrorMessage("Speech recognition is not available in this browser.");
-      cleanup();
-      return cleanup;
-    }
-
-    let disposed = false;
-
-    const startRecognition = (track: MediaStreamTrack, recognition: SpeechRecognitionLike) => {
-      if (!shouldRunRef.current || disposed) {
-        return;
-      }
-
-      try {
-        recognition.start(track);
-        setStatus("listening");
-      } catch (error) {
-        setStatus("unsupported");
-        setErrorMessage(
-          "This browser cannot transcribe directly from a video audio track.",
-        );
-        console.error("SpeechRecognition track start failed", error);
-      }
-    };
-
-    const loadVideoSource = (video: HTMLVideoElement, source: string) =>
-      new Promise<boolean>((resolve) => {
-        let settled = false;
-        const timeoutId = window.setTimeout(() => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          resolve(false);
-        }, 8000);
-
-        const cleanupListeners = () => {
-          window.clearTimeout(timeoutId);
-          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-          video.removeEventListener("error", handleError);
-        };
-
-        const handleLoadedMetadata = () => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanupListeners();
-          resolve(true);
-        };
-
-        const handleError = () => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanupListeners();
-          resolve(false);
-        };
-
-        video.addEventListener("loadedmetadata", handleLoadedMetadata);
-        video.addEventListener("error", handleError);
-
-        video.src = source;
-        video.load();
-      });
-
-    const waitForAudioTrack = (stream: MediaStream, timeoutMs = 3000) =>
-      new Promise<MediaStreamTrack | null>((resolve) => {
-        const immediateTrack = stream.getAudioTracks()[0];
-        if (immediateTrack) {
-          resolve(immediateTrack);
-          return;
-        }
-
-        let settled = false;
-        const timeoutId = window.setTimeout(() => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          stream.removeEventListener("addtrack", handleAddTrack);
-          resolve(null);
-        }, timeoutMs);
-
-        const handleAddTrack = (event: Event) => {
-          const track = (event as MediaStreamTrackEvent).track;
-          if (!track || track.kind !== "audio" || settled) {
-            return;
-          }
-
-          settled = true;
-          window.clearTimeout(timeoutId);
-          stream.removeEventListener("addtrack", handleAddTrack);
-          resolve(track);
-        };
-
-        stream.addEventListener("addtrack", handleAddTrack);
-      });
-
-    const init = async () => {
-      setStatus("loading");
-      setErrorMessage(null);
-
-      const video = document.createElement("video");
-      video.crossOrigin = "anonymous";
-      video.playsInline = true;
-      video.muted = true;
-      video.loop = true;
-      video.preload = "auto";
-      videoRef.current = video;
-
-      const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
-      const candidateSources = [mediaUrl, fallbackMediaUrl]
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-        .filter((value, index, all) => all.indexOf(value) === index);
-
-      const captureVideo = video as HTMLVideoElement & {
-        captureStream?: () => MediaStream;
-        mozCaptureStream?: () => MediaStream;
-      };
-
-      const getTrackFromSource = async (source: string) => {
-        if (!shouldRunRef.current || disposed) {
-          return null;
-        }
-
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
-        }
-
-        const loaded = await loadVideoSource(video, source);
-        if (!loaded || !shouldRunRef.current || disposed) {
-          return null;
-        }
-
-        try {
-          await video.play();
-        } catch {
-          // Keep trying; captureStream may still expose tracks after metadata load.
-        }
-
-        const stream =
-          captureVideo.captureStream?.() ?? captureVideo.mozCaptureStream?.();
-        if (!stream) {
-          setStatus("unsupported");
-          setErrorMessage("Media stream capture is unavailable in this browser.");
-          return null;
-        }
-
-        streamRef.current = stream;
-        return waitForAudioTrack(stream, 3500);
-      };
-
-      let audioTrack: MediaStreamTrack | null = null;
-      for (const source of candidateSources) {
-        audioTrack = await getTrackFromSource(source);
-        if (audioTrack) {
-          break;
-        }
-      }
-
-      if (!audioTrack) {
-        setStatus("no-audio-track");
-        setErrorMessage(
-          "No audio track detected from remote media or local fallback.",
-        );
-        return;
-      }
-
-      const recognition = new RecognitionCtor();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = language;
-
-      recognition.onresult = (event: any) => {
-        if (!shouldRunRef.current || disposed) {
-          return;
-        }
-
-        let nextInterimWords: string[] = [];
-
-        for (let index = event.resultIndex; index < event.results.length; index += 1) {
-          const result = event.results[index];
-          const transcript = result?.[0]?.transcript?.trim() ?? "";
-          if (!transcript) {
-            continue;
-          }
-
-          const words = transcript.split(/\s+/).filter(Boolean);
-          if (!words.length) {
-            continue;
-          }
-
-          if (result.isFinal) {
-            setFinalWords((current) => {
-              const withWordCap = [...current, ...words].slice(-maxWords);
-              return trimWordsToMaxChars(
-                withWordCap,
-                maxVisibleCharsRef.current,
-              );
-            });
-            nextInterimWords = [];
-          } else {
-            nextInterimWords = words;
-          }
-        }
-
-        setInterimWords(
-          trimWordsToMaxChars(nextInterimWords, maxVisibleCharsRef.current),
-        );
-      };
-
-      recognition.onerror = (event: any) => {
-        if (!shouldRunRef.current || disposed) {
-          return;
-        }
-
-        setStatus("error");
-        setErrorMessage(event?.error ? `Recognition error: ${event.error}` : "Recognition error");
-      };
-
-      recognition.onend = () => {
-        if (!shouldRunRef.current || disposed) {
-          return;
-        }
-
-        startRecognition(audioTrack, recognition);
-      };
-
-      recognitionRef.current = recognition;
-      startRecognition(audioTrack, recognition);
-    };
-
-    init();
+    const animation = text.animate(
+      [
+        { transform: `translate(calc(-50% + ${startX}px), -50%)` },
+        { transform: `translate(calc(-50% + ${endX}px), -50%)` },
+      ],
+      {
+        duration: animationDurationMs,
+        easing: "linear",
+        fill: "forwards",
+      },
+    );
 
     return () => {
-      disposed = true;
-      cleanup();
+      animation.cancel();
     };
-  }, [language, maxWords, mediaUrl, restartToken]);
-
-  const statusLabel = useMemo(() => {
-    switch (status) {
-      case "loading":
-        return "Initializing";
-      case "listening":
-        return "Listening";
-      case "unsupported":
-        return "Unsupported";
-      case "no-video":
-        return "No Video";
-      case "no-audio-track":
-        return "No Audio Track";
-      case "error":
-        return "Error";
-      default:
-        return "Idle";
-    }
-  }, [status]);
-
-  const displayWords = useMemo(
-    () => trimWordsToMaxChars([...finalWords, ...interimWords], maxVisibleChars),
-    [finalWords, interimWords, maxVisibleChars],
-  );
+  }, [audioDurationSeconds, imageKey, layoutToken, transcriptText]);
 
   return (
     <div
@@ -547,13 +274,21 @@ const MediaTranscript: React.FC<{
     >
       <div
         ref={transcriptViewportRef}
-        className="rotate-180 flex items-center h-14 overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 text-[14px] leading-7"
+        className={`relative flex h-14 items-center justify-center overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 text-[14px] leading-7 ${
+          isOrbLikeView ? "rotate-180" : ""
+        }`}
       >
-        {displayWords.length === 0 && (
-          <span className="text-white/70">Waiting for speech...</span>
-        )}
-        {displayWords.length > 0 && (
-          <span className="text-white">{displayWords.join(" ")}</span>
+        {transcriptText.length === 0 ? (
+          <span className="text-xl text-center text-white/70">
+            No transcription for this scene.
+          </span>
+        ) : (
+          <span
+            ref={transcriptTextRef}
+            className="absolute left-1/2 top-1/2 text-center text-white"
+          >
+            {transcriptText}
+          </span>
         )}
       </div>
     </div>

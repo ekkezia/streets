@@ -311,7 +311,9 @@ const LocationMap: React.FC<{
             : undefined,
           right: isTouchLandscapeOrbView
             ? undefined
-            : "var(--overlay-map-right, 8px)",
+            : isOrbLikeView
+              ? "var(--overlay-map-right, 8px)"
+              : "var(--overlay-map-vertical, 8px)",
           left: isTouchLandscapeOrbView
             ? "var(--overlay-map-right, 8px)"
             : undefined,

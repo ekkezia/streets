@@ -11,7 +11,7 @@ import React, {
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import ModelLoader from "../atoms/model-loader";
-import { ArrowDirection, Move } from "../atoms/model-arrow";
+import { Move } from "../atoms/model-arrow";
 import ModelEnv from "../atoms/model-env";
 import SubjectPresence, { TrackedSubject } from "../atoms/subject-presence";
 import GlassOrb3DProjection from "../atoms/glass-orb-3d-projection";
@@ -36,11 +36,18 @@ import {
 } from "three";
 import { usePathname, useRouter } from "next/navigation";
 import SubtitleText from "./subtitle-text";
+import EquirectangularView from "./equirectangular-view";
 import { useLanguageContext } from "@/contexts/language-context";
 import useRestrictedUiAccess from "@/hooks/useRestrictedUiAccess";
+import {
+  createPairedAudioController,
+  getLocalAssetFallbackPath,
+  isAudioUnlockRemembered,
+  isVideoMediaUrl,
+  rememberAudioUnlock,
+} from "./model-canvas-media";
+import { useActiveMediaTexture } from "./model-canvas-texture";
 
-const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg"];
-const AUDIO_UNLOCK_SESSION_KEY = "streets_audio_unlocked";
 const ORB_AUTOPLAY_INTERVAL_MS = 2600;
 const ORB_AUTOPLAY_START_INDEX = 1;
 const ORB_AUTOPLAY_END_INDEX = 30;
@@ -48,69 +55,6 @@ const ORB_AUTOPLAY_VIDEO_FALLBACK_MS = 8000;
 const ORB_SYNC_POLL_INTERVAL_MS = 300;
 const ORB_SYNC_CAMERA_SEND_INTERVAL_MS = 120;
 const ORB_SYNC_HEARTBEAT_INTERVAL_MS = 2000;
-
-declare global {
-  interface Window {
-    __streetsAudioUnlocked?: boolean;
-  }
-}
-
-const stripQueryAndHash = (url: string) => url.split("#")[0].split("?")[0];
-
-const isVideoMediaUrl = (url: string) => {
-  const normalizedUrl = stripQueryAndHash(url).toLowerCase();
-  return VIDEO_EXTENSIONS.some((extension) => normalizedUrl.endsWith(extension));
-};
-
-const hasUserActivatedPage = () => {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-
-  return Boolean(
-    (navigator as Navigator & { userActivation?: { hasBeenActive?: boolean } })
-      .userActivation?.hasBeenActive,
-  );
-};
-
-const isAudioUnlockRemembered = () => {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  if (window.__streetsAudioUnlocked) {
-    return true;
-  }
-
-  try {
-    if (window.sessionStorage.getItem(AUDIO_UNLOCK_SESSION_KEY) === "1") {
-      window.__streetsAudioUnlocked = true;
-      return true;
-    }
-  } catch {
-    // Ignore storage access failures.
-  }
-
-  if (hasUserActivatedPage()) {
-    window.__streetsAudioUnlocked = true;
-    return true;
-  }
-
-  return false;
-};
-
-const rememberAudioUnlock = () => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.__streetsAudioUnlocked = true;
-  try {
-    window.sessionStorage.setItem(AUDIO_UNLOCK_SESSION_KEY, "1");
-  } catch {
-    // Ignore storage access failures.
-  }
-};
 
 const parseRotationOffsetToRadians = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -144,33 +88,6 @@ const parseRotationOffsetToRadians = (value: unknown): number | null => {
   return null;
 };
 
-const getLocalAssetFallbackPath = (mediaUrl: string) => {
-  if (!mediaUrl || mediaUrl.startsWith("data:") || mediaUrl.startsWith("blob:")) {
-    return null;
-  }
-
-  try {
-    const supabasePublicPath = new URL(SUPABASE_URL).pathname.replace(/\/+$/, "");
-    const mediaPath = new URL(mediaUrl, "http://localhost").pathname;
-    const normalizedMediaPath = mediaPath.replace(/\/+$/, "");
-
-    if (!normalizedMediaPath.startsWith(`${supabasePublicPath}/`)) {
-      return null;
-    }
-
-    const relativePath = normalizedMediaPath.slice(supabasePublicPath.length + 1);
-    if (!relativePath.length) {
-      return null;
-    }
-
-    console.log('Media URL failed to load, falling back to local asset if available:', `assets/${relativePath}`);
-
-    return `/assets/${relativePath}`;
-  } catch {
-    return null;
-  }
-};
-
 const getMediaPath = (projectId: ProjectId, textureIdx: number) => {
   const projectConfig = CONFIG[projectId];
   const perIndexMedia = projectConfig.mediaByIndex?.[textureIdx];
@@ -191,178 +108,6 @@ const getMediaPath = (projectId: ProjectId, textureIdx: number) => {
     "." +
     extension
   );
-};
-
-const useActiveMediaTexture = (mediaUrl: string) => {
-  const [activeTexture, setActiveTexture] = useState<Texture | null>(null);
-
-  useEffect(() => {
-    let disposed = false;
-    let localVideoElement: HTMLVideoElement | null = null;
-    let localTexture: Texture | null = null;
-    const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
-
-    if (isVideoMediaUrl(mediaUrl)) {
-      const videoElement = document.createElement("video");
-      videoElement.crossOrigin = "anonymous";
-      videoElement.loop = true;
-      videoElement.muted = !isAudioUnlockRemembered();
-      videoElement.volume = 1;
-      videoElement.autoplay = true;
-      videoElement.playsInline = true;
-      videoElement.setAttribute("playsinline", "true");
-      videoElement.setAttribute("webkit-playsinline", "true");
-      videoElement.preload = "auto";
-      let hasAttemptedFallback = false;
-      let audioUnlocked = isAudioUnlockRemembered();
-
-      const attemptPlayback = async (preferUnmuted: boolean) => {
-        if (disposed) {
-          return false;
-        }
-
-        if (preferUnmuted) {
-          videoElement.muted = false;
-          try {
-            await videoElement.play();
-            audioUnlocked = true;
-            rememberAudioUnlock();
-            return true;
-          } catch {
-            // Continue with muted fallback for Safari/iPad autoplay policy.
-          }
-        }
-
-        videoElement.muted = true;
-        audioUnlocked = false;
-        try {
-          await videoElement.play();
-        } catch {
-          // Keep paused if browser still blocks playback.
-        }
-
-        return false;
-      };
-
-      const tryUnlockVideoAudio = () => {
-        if (disposed) {
-          return;
-        }
-
-        if (audioUnlocked && !videoElement.muted && !videoElement.paused) {
-          return;
-        }
-
-        void attemptPlayback(true);
-      };
-
-      const handleUserInteractionForAudio = () => {
-        tryUnlockVideoAudio();
-      };
-
-      const setVideoSource = (nextSource: string) => {
-        videoElement.src = nextSource;
-        videoElement.load();
-        void attemptPlayback(audioUnlocked);
-      };
-
-      const handleVideoError = () => {
-        if (disposed) {
-          return;
-        }
-
-        if (!hasAttemptedFallback && fallbackMediaUrl && videoElement.src !== fallbackMediaUrl) {
-          hasAttemptedFallback = true;
-          setVideoSource(fallbackMediaUrl);
-          return;
-        }
-
-        setActiveTexture(null);
-      };
-      videoElement.addEventListener("error", handleVideoError);
-      window.addEventListener("pointerdown", handleUserInteractionForAudio);
-      window.addEventListener("keydown", handleUserInteractionForAudio);
-      window.addEventListener("touchstart", handleUserInteractionForAudio);
-
-      const videoTexture = new VideoTexture(videoElement);
-      videoTexture.colorSpace = SRGBColorSpace;
-      videoTexture.minFilter = LinearFilter;
-      videoTexture.magFilter = LinearFilter;
-      videoTexture.generateMipmaps = false;
-
-      localVideoElement = videoElement;
-      localTexture = videoTexture;
-      setActiveTexture(videoTexture);
-      setVideoSource(mediaUrl);
-
-      const cleanupVideoEvents = () => {
-        videoElement.removeEventListener("error", handleVideoError);
-        window.removeEventListener("pointerdown", handleUserInteractionForAudio);
-        window.removeEventListener("keydown", handleUserInteractionForAudio);
-        window.removeEventListener("touchstart", handleUserInteractionForAudio);
-      };
-
-      // Reuse this cleanup in effect return via closure.
-      (videoElement as HTMLVideoElement & { __cleanupVideoEvents?: () => void }).__cleanupVideoEvents =
-        cleanupVideoEvents;
-    } else {
-      const loader = new TextureLoader();
-      let hasAttemptedFallback = false;
-
-      const loadTexture = (source: string) => {
-        loader.load(
-          source,
-          (texture) => {
-            if (disposed) {
-              texture.dispose();
-              return;
-            }
-            texture.colorSpace = SRGBColorSpace;
-            localTexture = texture;
-            setActiveTexture(texture);
-          },
-          undefined,
-          () => {
-            if (disposed) {
-              return;
-            }
-
-            if (!hasAttemptedFallback && fallbackMediaUrl && source !== fallbackMediaUrl) {
-              hasAttemptedFallback = true;
-              loadTexture(fallbackMediaUrl);
-              return;
-            }
-
-            setActiveTexture(null);
-          },
-        );
-      };
-
-      loadTexture(mediaUrl);
-    }
-
-    return () => {
-      disposed = true;
-
-      if (localTexture) {
-        setActiveTexture((current) => (current === localTexture ? null : current));
-        localTexture.dispose();
-      }
-
-      if (localVideoElement) {
-        (
-          localVideoElement as HTMLVideoElement & {
-            __cleanupVideoEvents?: () => void;
-          }
-        ).__cleanupVideoEvents?.();
-        localVideoElement.pause();
-        localVideoElement.src = "";
-        localVideoElement.load();
-      }
-    };
-  }, [mediaUrl]);
-
-  return activeTexture;
 };
 
 const orbControlRanges: Array<{
@@ -829,176 +574,6 @@ const OrbSubtitle: React.FC<{
   );
 };
 
-const getMoveLabel = (
-  direction: ArrowDirection,
-  tooltip: string | null,
-): string => {
-  if (tooltip) {
-    return tooltip;
-  }
-
-  switch (direction) {
-    case "reverse":
-      return "Reverse";
-    case "forward":
-      return "Forward";
-    case "left":
-      return "Left";
-    case "right":
-      return "Right";
-    case "up":
-      return "Up";
-    case "down":
-      return "Down";
-  }
-};
-
-const EquirectangularView: React.FC<{
-  mediaUrl: string;
-  isVideo: boolean;
-  currentMoves: DirectionTuple[];
-  onMove: (value: number) => void;
-}> = ({ mediaUrl, isVideo, currentMoves, onMove }) => {
-  const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
-  const [resolvedMediaUrl, setResolvedMediaUrl] = useState(mediaUrl);
-  const [videoMuted, setVideoMuted] = useState(() => !isAudioUnlockRemembered());
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    setResolvedMediaUrl(mediaUrl);
-    setVideoMuted(!isAudioUnlockRemembered());
-  }, [mediaUrl]);
-
-  useEffect(() => {
-    if (!isVideo) {
-      return;
-    }
-
-    const attemptPlayback = async (preferUnmuted: boolean) => {
-      const target = videoRef.current;
-      if (!target) {
-        return false;
-      }
-
-      if (preferUnmuted) {
-        target.muted = false;
-        setVideoMuted(false);
-        try {
-          await target.play();
-          setVideoMuted(false);
-          rememberAudioUnlock();
-          return true;
-        } catch {
-          // Continue with muted fallback for Safari/iPad autoplay policy.
-        }
-      }
-
-      target.muted = true;
-      setVideoMuted(true);
-      try {
-        await target.play();
-      } catch {
-        // Keep paused if browser still blocks playback.
-      }
-
-      return false;
-    };
-
-    const unlockAudio = () => {
-      const target = videoRef.current;
-      if (!target) {
-        return;
-      }
-
-      if (!target.paused && !target.muted) {
-        return;
-      }
-
-      void attemptPlayback(true);
-    };
-
-    const syncInlinePlaybackAttributes = () => {
-      const target = videoRef.current;
-      if (!target) {
-        return;
-      }
-
-      target.setAttribute("playsinline", "true");
-      target.setAttribute("webkit-playsinline", "true");
-    };
-
-    const tryStartPlayback = () => {
-      void attemptPlayback(isAudioUnlockRemembered());
-    };
-
-    syncInlinePlaybackAttributes();
-    tryStartPlayback();
-    const target = videoRef.current;
-    target?.addEventListener("loadedmetadata", tryStartPlayback);
-    target?.addEventListener("canplay", tryStartPlayback);
-
-    window.addEventListener("pointerdown", unlockAudio);
-    window.addEventListener("keydown", unlockAudio);
-    window.addEventListener("touchstart", unlockAudio);
-
-    return () => {
-      target?.removeEventListener("loadedmetadata", tryStartPlayback);
-      target?.removeEventListener("canplay", tryStartPlayback);
-      window.removeEventListener("pointerdown", unlockAudio);
-      window.removeEventListener("keydown", unlockAudio);
-      window.removeEventListener("touchstart", unlockAudio);
-    };
-  }, [isVideo, resolvedMediaUrl]);
-
-  const handleMediaError = useCallback(() => {
-    if (!fallbackMediaUrl) {
-      return;
-    }
-
-    setResolvedMediaUrl((current) =>
-      current === fallbackMediaUrl ? current : fallbackMediaUrl,
-    );
-  }, [fallbackMediaUrl]);
-
-  return (
-    <>
-      <div className="fixed inset-0 flex items-center justify-center bg-black">
-        {isVideo ? (
-          <video
-            autoPlay
-            className="h-full w-full object-contain"
-            loop
-            muted={videoMuted}
-            playsInline
-            ref={videoRef}
-            src={resolvedMediaUrl}
-            onError={handleMediaError}
-          />
-        ) : (
-          <img
-            alt="Equirectangular panorama"
-            className="h-full w-full object-contain"
-            onError={handleMediaError}
-            src={resolvedMediaUrl}
-          />
-        )}
-      </div>
-      <div className="fixed bottom-4 left-1/2 z-20 flex -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/15 bg-black/70 p-2 backdrop-blur-md">
-        {currentMoves.map(([direction, value, tooltip], idx) => (
-          <button
-            className="rounded-full border border-white/30 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-white transition hover:bg-white hover:text-black"
-            key={`${direction}-${value}-${idx}`}
-            onClick={() => onMove(value)}
-            type="button"
-          >
-            {getMoveLabel(direction, tooltip)}
-          </button>
-        ))}
-      </div>
-    </>
-  );
-};
-
 const ProjectScene: React.FC<{
   projectId: ProjectId;
   currentModel: number;
@@ -1220,9 +795,13 @@ const ModelCanvas: React.FC<{
     }
 
     const root = document.documentElement;
+    const isOrbOverlayMode = viewMode === "orb" || viewMode === "orb3d";
+    const effectiveMapRight = isOrbOverlayMode
+      ? overlayLayoutSettings.mapRight
+      : 0;
     root.style.setProperty(
       "--overlay-map-right",
-      `${overlayLayoutSettings.mapRight}px`,
+      `${effectiveMapRight}px`,
     );
     root.style.setProperty(
       "--overlay-map-vertical",
@@ -1240,7 +819,7 @@ const ModelCanvas: React.FC<{
       "--overlay-transcript-center-offset",
       `${overlayLayoutSettings.transcriptCenterOffset}px`,
     );
-  }, [overlayLayoutSettings]);
+  }, [overlayLayoutSettings, viewMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
