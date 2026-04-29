@@ -19,12 +19,14 @@ export default function Page({ params }: { params: { id: string } }) {
         imageId={params.id}
         column="2"
         rotation={[0, -Math.PI / 2, -Math.PI/4]}
+        filterStyle="brightness(1.5) contrast(0.9)"
       />
       <ModelCanvas
         projectId="hong-kong"
         imageId={params.id}
         column="1"
         rotation={[0, -Math.PI / 2, -Math.PI/4]}
+        filterStyle="brightness(1.5) contrast(0.9)"
         doubleBy={38}
       />
     </main>

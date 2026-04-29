@@ -12,6 +12,7 @@ export default function Home() {
           className="h-[50vh] w-screen items-start justify-center sm:h-screen sm:w-1/2"
           column={"1"}
           rotation={[0, -Math.PI / 2, -Math.PI/4]}
+          filterStyle="brightness(1.5) contrast(0.9)"
         />
         <ModelCanvas
           projectId="hong-kong"
@@ -20,6 +21,7 @@ export default function Home() {
           doubleBy={38}
           column={"2"}
           rotation={[0, -Math.PI / 2, -Math.PI/4]}
+          filterStyle="brightness(1.5) contrast(0.9)"
         />
       </main>
     </CarousellContextProvider>

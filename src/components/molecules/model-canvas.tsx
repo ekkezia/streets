@@ -782,7 +782,8 @@ const ModelCanvas: React.FC<{
   doubleBy?: number; // two columns, specify the number of images to be skipped if the canvas is for the 2nd texture on the right column
   scale?: [x: number, y: number, z: number]
   rotation?: [x: number, y: number, z: number]
-}> = ({ projectId, imageId, className, withSubtitle, column, doubleBy, scale, rotation }) => {
+  filterStyle?: string;
+}> = ({ projectId, imageId, className, withSubtitle, column, doubleBy, scale, rotation, filterStyle }) => {
   const pathname = usePathname();
   const router = useRouter();
   const isRestrictedUiAllowed = useRestrictedUiAccess();
@@ -1231,6 +1232,7 @@ const ModelCanvas: React.FC<{
         height: isSmallScreen ? "50vh" : "100vh",
         top: 0,
         left: isSmallScreen ? 0 : '50vw',
+        filter: filterStyle
     },
   "2": {
         position: "fixed",
@@ -1238,6 +1240,7 @@ const ModelCanvas: React.FC<{
         height: isSmallScreen ? "50vh" : "100vh",
         top: isSmallScreen ? "50vh" : 0,
         left: 0,
+        filter: filterStyle
     }
   }
 
@@ -1746,12 +1749,12 @@ const ModelCanvas: React.FC<{
                 width: "100vw",
                 height: "100vh",
                 zIndex: 10,
-                filter: "brightness(1.25) saturate(1.06)",
+                filter: filterStyle,
                 backgroundColor: "transparent",
               }
             : column
               ? style[column]
-              : {}),
+              : { filter: filterStyle }),
         }}
         gl={{
           toneMappingExposure: isOrbLikeMode
