@@ -938,7 +938,7 @@ const ModelCanvas: React.FC<{
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !isRestrictedUiAllowed) {
+    if (typeof window === "undefined") {
       return;
     }
 
@@ -965,7 +965,7 @@ const ModelCanvas: React.FC<{
     return () => {
       window.removeEventListener("keydown", handleFullscreenHotkey);
     };
-  }, [handleToggleFullscreen, isRestrictedUiAllowed]);
+  }, [handleToggleFullscreen]);
 
   const moveProps = {
     projectId: projectId,

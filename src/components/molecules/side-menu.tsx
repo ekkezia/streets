@@ -91,13 +91,22 @@ const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
 
         
 
-        <h1 className="font-bold text-gray-400">
-          Language      
-        </h1>
-        <div className="text-sm text-black">
-          Change the language for the subtitle of the story.
+        <div className="pb-4">
+          <h1 className="font-bold text-gray-400">
+            Language      
+          </h1>
+          <div className="text-sm text-black">
+            Change the language for the subtitle of the story.
+          </div>
+          <Dropdown options={languageLabels} onSelect={handleSelect} />
         </div>
-        <Dropdown options={languageLabels} onSelect={handleSelect} />
+
+        <h1 className=" font-bold text-gray-400">
+          Quick Tip
+        </h1>
+        <div className="text-black text-sm pb-4">
+          Press 'F' on Desktop to view in full screen.
+        </div>
       </div>
 
       <div className="bg-white rounded-r h-fit w-fit py-4 pl-2 cursor-pointer"
@@ -110,9 +119,9 @@ const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
             <polygon points="5,7 15,15 5,23" fill="currentColor" />
           </svg>
         </div>
-
+        
       </div>
-
+    
     </div>
   )
 }

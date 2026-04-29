@@ -341,7 +341,7 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
         ref={transcriptViewportRef}
         className={
           `
-          border-2 border-white/50 bg-gray-900/65
+          border-2 border-white/50 bg-gray-900/70
           rounded-md relative flex h-14 items-center justify-center overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 leading-7 ${
           isOrbLikeView ? "rotate-180" : ""
         }`}
