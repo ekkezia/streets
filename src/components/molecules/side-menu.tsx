@@ -105,7 +105,7 @@ const SideMenu: React.FC<{ projectId: ProjectId }> = ({ projectId }) => {
           Quick Tip
         </h1>
         <div className="text-black text-sm pb-4">
-          Press 'F' on Desktop to view in full screen.
+          Press &apos;F&apos; on Desktop to view in full screen.
         </div>
       </div>
 
