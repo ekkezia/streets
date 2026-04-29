@@ -12,7 +12,7 @@ export async function generateStaticParams() {
 export default async function Page({ params }: { params: { id: string } }) {
   return (
     <main className="fixed left-0 top-0 flex h-screen w-screen items-start justify-center">
-      <ModelCanvas projectId="new-york-city" imageId={params.id} withSubtitle scale={[1, 1, -1]} filterStyle="brightness(1.1) contrast(0.9)" />
+      <ModelCanvas projectId="new-york-city" imageId={params.id} withSubtitle scale={[1, 1, -1]} filterStyle="brightness(1.1) contrast(0.9) saturate(1.25)" />
     </main>
   );
 }
