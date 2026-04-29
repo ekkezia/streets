@@ -38,11 +38,11 @@ export default function Home() {
 
   return (
     <main className="fixed left-0 top-0 flex h-screen w-screen flex-col justify-center">
-      <div className="flex items-center gap-3 px-4 pt-4">
+      <div className="flex items-center gap-3 px-4 p-4">
         {isRestrictedUiAllowed && (
           <>
             <button
-              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+              className={`rounded-sm border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
                 viewMode === "sphere"
                   ? "border-black bg-black text-white"
                   : "border-gray-300 bg-white text-gray-700"
@@ -53,7 +53,7 @@ export default function Home() {
               Sphere Mode
             </button>
             <button
-              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+              className={`rounded-sm border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
                 viewMode === "orb"
                   ? "border-black bg-black text-white"
                   : "border-gray-300 bg-white text-gray-700"
@@ -64,7 +64,7 @@ export default function Home() {
               Glass Orb Mode
             </button>
             <button
-              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+              className={`rounded-sm border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
                 viewMode === "equirect"
                   ? "border-black bg-black text-white"
                   : "border-gray-300 bg-white text-gray-700"
@@ -75,7 +75,7 @@ export default function Home() {
               Equirectangular Mode
             </button>
             <button
-              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+              className={`rounded-sm border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
                 viewMode === "orb3d"
                   ? "border-black bg-black text-white"
                   : "border-gray-300 bg-white text-gray-700"
@@ -92,7 +92,7 @@ export default function Home() {
         )}
       </div>
 
-      <div className="no-scrollbar flex w-full gap-8 overflow-x-scroll rounded-none bg-gray-200 px-4 py-12">
+      <div className="no-scrollbar flex w-sm gap-8 overflow-x-scroll rounded-none bg-gray-200 px-4 py-12">
         <Link href={getLocationHref("/hong-kong")}>
           <h3 className="h3 min-w-[100px] rounded-sm bg-gray-500 px-2 text-center text-nowrap text-white hover:text-gray-300">
             Hong Kong

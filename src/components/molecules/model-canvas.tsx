@@ -27,26 +27,20 @@ import {
   SUPABASE_URL,
   TLanguage,
 } from "@/config/config";
-import {
-  LinearFilter,
-  SRGBColorSpace,
-  Texture,
-  TextureLoader,
-  VideoTexture,
-} from "three";
 import { usePathname, useRouter } from "next/navigation";
 import SubtitleText from "./subtitle-text";
 import EquirectangularView from "./equirectangular-view";
 import { useLanguageContext } from "@/contexts/language-context";
 import useRestrictedUiAccess from "@/hooks/useRestrictedUiAccess";
 import {
-  createPairedAudioController,
   getLocalAssetFallbackPath,
-  isAudioUnlockRemembered,
   isVideoMediaUrl,
-  rememberAudioUnlock,
 } from "./model-canvas-media";
 import { useActiveMediaTexture } from "./model-canvas-texture";
+import {
+  OverlayLayoutSettings,
+  useModelCanvasModes,
+} from "@/hooks/useModelCanvasModes";
 
 const ORB_AUTOPLAY_INTERVAL_MS = 2600;
 const ORB_AUTOPLAY_START_INDEX = 1;
@@ -55,6 +49,65 @@ const ORB_AUTOPLAY_VIDEO_FALLBACK_MS = 8000;
 const ORB_SYNC_POLL_INTERVAL_MS = 300;
 const ORB_SYNC_CAMERA_SEND_INTERVAL_MS = 120;
 const ORB_SYNC_HEARTBEAT_INTERVAL_MS = 2000;
+const ORB_TONE_MAPPING_EXPOSURE = 1.15;
+const SPHERE_TONE_MAPPING_EXPOSURE = 1.05;
+const PROJECTS_WITH_LOCAL_ASSET_FALLBACK = new Set<ProjectId>([
+  "new-york-city",
+]);
+const PROJECT_MEDIA_PRELOAD_CONCURRENCY = 6;
+const preloadedProjects = new Set<ProjectId>();
+
+const drainResponseBody = async (response: Response) => {
+  if (!response.body) {
+    await response.arrayBuffer();
+    return;
+  }
+
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done } = await reader.read();
+      if (done) {
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+};
+
+const preloadSceneMedia = async (
+  mediaUrl: string,
+  useLocalAssetFallback: boolean,
+  signal: AbortSignal,
+) => {
+  const fallbackMediaUrl = useLocalAssetFallback
+    ? getLocalAssetFallbackPath(mediaUrl)
+    : null;
+  const candidateSources = [mediaUrl, fallbackMediaUrl]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .filter((value, index, all) => all.indexOf(value) === index);
+
+  for (const source of candidateSources) {
+    try {
+      const response = await fetch(source, {
+        cache: "force-cache",
+        signal,
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      await drainResponseBody(response);
+      return;
+    } catch {
+      if (signal.aborted) {
+        return;
+      }
+    }
+  }
+};
 
 const parseRotationOffsetToRadians = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -161,14 +214,6 @@ const orbControlRanges: Array<{
 type CameraOption = {
   id: string;
   label: string;
-};
-
-type OverlayLayoutSettings = {
-  mapRight: number;
-  mapVertical: number;
-  transcriptRight: number;
-  transcriptVertical: number;
-  transcriptCenterOffset: number;
 };
 
 const OrbControls: React.FC<{
@@ -586,6 +631,7 @@ const ProjectScene: React.FC<{
   withSubtitle?: boolean;
   doubleBy?: number;
   scale?: [x: number, y: number, z: number];
+  rotation?: [x: number, y: number, z: number];
   orbMode?: boolean;
   orb3DMode?: boolean;
   orbSettings: GlassOrbSettings;
@@ -595,7 +641,9 @@ const ProjectScene: React.FC<{
   listenerMode: boolean;
   remotePointerControlEnabled: boolean;
   remoteOrbRotation: OrbRotationSnapshot | null;
-  sphereDefaultRotationOffset: number;
+  useLocalAssetFallback?: boolean;
+  mediaSessionKey: string;
+  transcriptSyncKey: string;
 }> = ({
   projectId,
   currentModel,
@@ -604,6 +652,7 @@ const ProjectScene: React.FC<{
   withSubtitle,
   doubleBy,
   scale,
+  rotation,
   orbMode,
   orb3DMode,
   orbSettings,
@@ -613,13 +662,27 @@ const ProjectScene: React.FC<{
   listenerMode,
   remotePointerControlEnabled,
   remoteOrbRotation,
-  sphereDefaultRotationOffset,
+  useLocalAssetFallback = false,
+  mediaSessionKey,
+  transcriptSyncKey,
 }) => {
   const textureIndex = (doubleBy ? doubleBy + currentModel : currentModel) - 1;
   const activeMediaUrl =
     mediaUrls[Math.min(Math.max(textureIndex, 0), mediaUrls.length - 1)];
-  const activeTexture = useActiveMediaTexture(activeMediaUrl);
+  const activeTexture = useActiveMediaTexture(
+    activeMediaUrl,
+    useLocalAssetFallback,
+    mediaSessionKey,
+    transcriptSyncKey,
+  );
   const isOrbVisualMode = Boolean(orbMode || orb3DMode);
+  const rotationOffset = rotation ?? [0, 0, 0];
+  const effectiveOrbSettings = {
+    ...orbSettings,
+    yaw: orbSettings.yaw + rotationOffset[1],
+    xRotation: orbSettings.xRotation + rotationOffset[0],
+    zRotation: orbSettings.zRotation + rotationOffset[2],
+  };
 
   if (!activeTexture) {
     return null;
@@ -629,13 +692,13 @@ const ProjectScene: React.FC<{
     <>
       <ambientLight intensity={isOrbVisualMode ? 0.35 : 0.5} />
       <directionalLight
-        intensity={isOrbVisualMode ? 1.9 : 1}
+        intensity={isOrbVisualMode ? 1.9 : 0.75}
         position={isOrbVisualMode ? [6, 4, 8] : [5, 5, 5]}
       />
       {orb3DMode ? (
         <GlassOrb3DProjection
           texture={activeTexture}
-          settings={orbSettings}
+          settings={effectiveOrbSettings}
           trackedSubjects={trackedSubjects}
           headFollowPositionEnabled={headFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
@@ -647,7 +710,7 @@ const ProjectScene: React.FC<{
       ) : orbMode ? (
         <GlassOrbProjection
           texture={activeTexture}
-          settings={orbSettings}
+          settings={effectiveOrbSettings}
           trackedSubjects={trackedSubjects}
           headFollowPositionEnabled={headFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
@@ -659,9 +722,9 @@ const ProjectScene: React.FC<{
       ) : (
         <>
           <ModelEnv
-            rotation={[0, Math.PI / 2 + sphereDefaultRotationOffset, 0]}
+            rotation={rotation ?? [0, -Math.PI / 2, 0]}
             texture={activeTexture}
-            scale={scale ?? [-1, -1, 1]}
+            scale={scale ?? [1, 1, -1]}
           />
           {withSubtitle && CONFIG[projectId].text[currentModel] && (
             <SubtitleText>{CONFIG[projectId].text[currentModel]}</SubtitleText>
@@ -718,15 +781,11 @@ const ModelCanvas: React.FC<{
   column?: '1' | '2';
   doubleBy?: number; // two columns, specify the number of images to be skipped if the canvas is for the 2nd texture on the right column
   scale?: [x: number, y: number, z: number]
-}> = ({ projectId, imageId, className, withSubtitle, column, doubleBy, scale }) => {
+  rotation?: [x: number, y: number, z: number]
+}> = ({ projectId, imageId, className, withSubtitle, column, doubleBy, scale, rotation }) => {
   const pathname = usePathname();
   const router = useRouter();
   const isRestrictedUiAllowed = useRestrictedUiAccess();
-  const [viewMode, setViewMode] = useState<
-    "sphere" | "orb" | "orb3d" | "equirect"
-  >(
-    "sphere",
-  );
   const currentIndexToPathname =
     pathname.split("/").length <= 2
       ? "1"
@@ -741,14 +800,6 @@ const ModelCanvas: React.FC<{
   const [orbSettings, setOrbSettings] = useState<GlassOrbSettings>(
     DEFAULT_GLASS_ORB_SETTINGS,
   );
-  const [overlayLayoutSettings, setOverlayLayoutSettings] =
-    useState<OverlayLayoutSettings>({
-      mapRight: -50,
-      mapVertical: 8,
-      transcriptRight: -35,
-      transcriptVertical: 0,
-      transcriptCenterOffset: -30,
-    });
   const [showOrbControls, setShowOrbControls] = useState(false);
   const [trackedSubjects, setTrackedSubjects] = useState<TrackedSubject[]>([]);
   const [trackingCameraEnabled, setTrackingCameraEnabled] = useState(false);
@@ -783,60 +834,31 @@ const ModelCanvas: React.FC<{
   const [orbRoleWarning, setOrbRoleWarning] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const activeTrackedSubjectRef = useRef<TrackedSubject | null>(null);
+  const useLocalAssetFallback = PROJECTS_WITH_LOCAL_ASSET_FALLBACK.has(
+    projectId,
+  );
+  const [projectMediaPreloadReady, setProjectMediaPreloadReady] = useState(false);
+  const [projectMediaPreloadLoaded, setProjectMediaPreloadLoaded] = useState(0);
+  const hasSecondaryCanvas = typeof doubleBy === "number";
+  const {
+    overlayLayoutSettings,
+    setOverlayLayoutSettings,
+    isOrbMode,
+    isOrb3DMode,
+    isOrbLikeMode,
+    showOrbUi,
+    showEquirectUi,
+    shouldHideSecondaryOrbCanvas,
+  } = useModelCanvasModes({
+    pathname,
+    isRestrictedUiAllowed,
+    hasSecondaryCanvas,
+  });
 
   useEffect(() => {
     setCurrentModel(parseInt(currentIndexToPathname));
     setShowOrbControls(false);
   }, [currentIndexToPathname]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
-
-    const root = document.documentElement;
-    const isOrbOverlayMode = viewMode === "orb" || viewMode === "orb3d";
-    const effectiveMapRight = isOrbOverlayMode
-      ? overlayLayoutSettings.mapRight
-      : 0;
-    root.style.setProperty(
-      "--overlay-map-right",
-      `${effectiveMapRight}px`,
-    );
-    root.style.setProperty(
-      "--overlay-map-vertical",
-      `${overlayLayoutSettings.mapVertical}px`,
-    );
-    root.style.setProperty(
-      "--overlay-transcript-right",
-      `${overlayLayoutSettings.transcriptRight}px`,
-    );
-    root.style.setProperty(
-      "--overlay-transcript-vertical",
-      `${overlayLayoutSettings.transcriptVertical}px`,
-    );
-    root.style.setProperty(
-      "--overlay-transcript-center-offset",
-      `${overlayLayoutSettings.transcriptCenterOffset}px`,
-    );
-  }, [overlayLayoutSettings, viewMode]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const view = params.get("view");
-    if (
-      isRestrictedUiAllowed &&
-      (view === "orb" || view === "orb3d" || view === "equirect")
-    ) {
-      setViewMode(view);
-      return;
-    }
-    setViewMode("sphere");
-  }, [isRestrictedUiAllowed, pathname]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -950,22 +972,85 @@ const ModelCanvas: React.FC<{
     onMove: setCurrentModel,
   };
 
-  const mediaUrls = Array(CONFIG[projectId].numberOfImages)
-    .fill(null)
-    .map((_, idx) => getMediaPath(projectId, idx + 1));
+  const mediaUrls = useMemo(
+    () =>
+      Array(CONFIG[projectId].numberOfImages)
+        .fill(null)
+        .map((_, idx) => getMediaPath(projectId, idx + 1)),
+    [projectId],
+  );
+  const mediaSessionKey = useMemo(
+    () => `${projectId}:${column ?? "single"}:${doubleBy ?? "primary"}`,
+    [column, doubleBy, projectId],
+  );
+  const transcriptSyncKey = useMemo(
+    () => `${projectId}:${currentModel}`,
+    [currentModel, projectId],
+  );
   const textureIndex = (doubleBy ? doubleBy + currentModel : currentModel) - 1;
   const activeMediaUrl =
     mediaUrls[Math.min(Math.max(textureIndex, 0), mediaUrls.length - 1)];
-  const isOrbMode = viewMode === "orb";
-  const isOrb3DMode = viewMode === "orb3d";
-  const isOrbLikeMode = isOrbMode || isOrb3DMode;
-  const isEquirectMode = viewMode === "equirect";
-  const showOrbUi = isRestrictedUiAllowed && isOrbLikeMode && !doubleBy;
-  const showEquirectUi = isRestrictedUiAllowed && isEquirectMode && !doubleBy;
-  const shouldHideSecondaryOrbCanvas =
-    isRestrictedUiAllowed &&
-    (isOrbLikeMode || isEquirectMode) &&
-    typeof doubleBy === "number";
+
+  useEffect(() => {
+    if (shouldHideSecondaryOrbCanvas) {
+      return;
+    }
+
+    if (preloadedProjects.has(projectId)) {
+      setProjectMediaPreloadLoaded(mediaUrls.length);
+      setProjectMediaPreloadReady(true);
+      return;
+    }
+
+    let disposed = false;
+    const controller = new AbortController();
+
+    setProjectMediaPreloadReady(false);
+    setProjectMediaPreloadLoaded(0);
+
+    let nextIndex = 0;
+    const worker = async () => {
+      while (!disposed && !controller.signal.aborted) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= mediaUrls.length) {
+          break;
+        }
+
+        await preloadSceneMedia(
+          mediaUrls[index],
+          useLocalAssetFallback,
+          controller.signal,
+        );
+
+        if (!disposed) {
+          setProjectMediaPreloadLoaded((count) => count + 1);
+        }
+      }
+    };
+
+    const workers = Array.from(
+      { length: Math.min(PROJECT_MEDIA_PRELOAD_CONCURRENCY, mediaUrls.length) },
+      () => worker(),
+    );
+
+    void Promise.allSettled(workers).then(() => {
+      if (!disposed) {
+        preloadedProjects.add(projectId);
+        setProjectMediaPreloadReady(true);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, [
+    mediaUrls,
+    projectId,
+    shouldHideSecondaryOrbCanvas,
+    useLocalAssetFallback,
+  ]);
 
   // Two Columns Style
   const [isSmallScreen, setIsSmallScreen] = useState(false);
@@ -999,7 +1084,9 @@ const ModelCanvas: React.FC<{
     video.setAttribute("playsinline", "true");
     video.setAttribute("webkit-playsinline", "true");
 
-    const fallbackMediaUrl = getLocalAssetFallbackPath(activeMediaUrl);
+    const fallbackMediaUrl = useLocalAssetFallback
+      ? getLocalAssetFallbackPath(activeMediaUrl)
+      : null;
     const candidateSources = [activeMediaUrl, fallbackMediaUrl]
       .filter((value): value is string => typeof value === "string" && value.length > 0)
       .filter((value, index, all) => all.indexOf(value) === index);
@@ -1079,7 +1166,7 @@ const ModelCanvas: React.FC<{
       disposed = true;
       cleanup();
     };
-  }, [activeMediaUrl, isOrbLikeMode, showOrbUi]);
+  }, [activeMediaUrl, isOrbLikeMode, showOrbUi, useLocalAssetFallback]);
 
   useEffect(() => {
     if (
@@ -1154,43 +1241,6 @@ const ModelCanvas: React.FC<{
     }
   }
 
-  const sphereDefaultRotationOffset = useMemo(() => {
-    const projectConfig = CONFIG[projectId];
-    const locationByKey = projectConfig.location;
-    const numericLocationKeys = Object.keys(locationByKey)
-      .map((key) => Number.parseInt(key, 10))
-      .filter((key) => Number.isFinite(key))
-      .sort((a, b) => a - b);
-
-    if (!numericLocationKeys.length) {
-      return 0;
-    }
-
-    const candidateKeys = numericLocationKeys.filter((key) => key <= currentModel);
-    const fallbackKeys = candidateKeys.length ? candidateKeys : numericLocationKeys;
-
-    const locationKeyWithOffset = [...fallbackKeys]
-      .reverse()
-      .find((key) => {
-        const rawOffset = locationByKey[key]?.defaultRotationOffset;
-        return parseRotationOffsetToRadians(rawOffset) !== null;
-      });
-
-    if (typeof locationKeyWithOffset === "number") {
-      const parsedLocationOffset = parseRotationOffsetToRadians(
-        locationByKey[locationKeyWithOffset]?.defaultRotationOffset,
-      );
-
-      if (parsedLocationOffset !== null) {
-        return parsedLocationOffset;
-      }
-    }
-
-    const parsedProjectOffset = parseRotationOffsetToRadians(
-      projectConfig.defaultRotationOffset,
-    );
-    return parsedProjectOffset ?? 0;
-  }, [currentModel, projectId]);
   const maxOrbAutoplayIndex = Math.min(
     ORB_AUTOPLAY_END_INDEX,
     CONFIG[projectId].numberOfImages,
@@ -1214,6 +1264,7 @@ const ModelCanvas: React.FC<{
       const query = params.toString();
       router.replace(
         `/${projectId}/${currentModel.toString()}${query ? `?${query}` : ""}`,
+        { scroll: false },
       );
     },
     [currentModel, projectId, router],
@@ -1250,7 +1301,9 @@ const ModelCanvas: React.FC<{
       }
 
       const query = window.location.search ?? "";
-      router.replace(`/${projectId}/${nextModel.toString()}${query}`);
+      router.replace(`/${projectId}/${nextModel.toString()}${query}`, {
+        scroll: false,
+      });
     }, autoplayDelayMs);
 
     return () => {
@@ -1556,7 +1609,9 @@ const ModelCanvas: React.FC<{
     }
 
     const search = window.location.search ?? "";
-    router.push(`/${projectId}/${nextModel.toString()}${search}`);
+    router.push(`/${projectId}/${nextModel.toString()}${search}`, {
+      scroll: false,
+    });
   };
 
   useEffect(() => {
@@ -1635,12 +1690,38 @@ const ModelCanvas: React.FC<{
     return null;
   }
 
+  if (!projectMediaPreloadReady) {
+    const progressPercent = mediaUrls.length
+      ? Math.round((projectMediaPreloadLoaded / mediaUrls.length) * 100)
+      : 100;
+
+    return (
+      <div className="fixed inset-0 z-[12000] flex items-center justify-center bg-black">
+        <div className="w-[300px] rounded-xl border border-white/15 bg-white/90 p-4 text-black shadow-xl">
+          <div className="text-center text-xs font-semibold tracking-[0.12em]">
+            Loading...
+          </div>
+          <div className="mt-3 h-2 w-full overflow-hidden rounded bg-black/15">
+            <div
+              className="h-full bg-black transition-[width] duration-200"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          <div className="mt-2 text-center text-xs text-black/70">
+            {projectMediaPreloadLoaded}/{mediaUrls.length} images
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (showEquirectUi) {
     return (
       <>
         <EquirectangularView
           mediaUrl={activeMediaUrl}
           isVideo={isVideoMediaUrl(activeMediaUrl)}
+          useLocalAssetFallback={useLocalAssetFallback}
           currentMoves={currentMoves}
           onMove={handleEquirectMove}
         />
@@ -1665,7 +1746,7 @@ const ModelCanvas: React.FC<{
                 width: "100vw",
                 height: "100vh",
                 zIndex: 10,
-                filter: "brightness(1.2) contrast(1.25) saturate(1.06)",
+                filter: "brightness(1.25) saturate(1.06)",
                 backgroundColor: "transparent",
               }
             : column
@@ -1673,7 +1754,9 @@ const ModelCanvas: React.FC<{
               : {}),
         }}
         gl={{
-          toneMappingExposure: isOrbLikeMode ? 1.45 : 4,
+          toneMappingExposure: isOrbLikeMode
+            ? ORB_TONE_MAPPING_EXPOSURE
+            : SPHERE_TONE_MAPPING_EXPOSURE,
           alpha: isOrbLikeMode,
         }}
         camera={
@@ -1696,6 +1779,7 @@ const ModelCanvas: React.FC<{
             withSubtitle={withSubtitle}
             doubleBy={doubleBy}
             scale={scale}
+            rotation={rotation}
             orbMode={isOrbMode}
             orb3DMode={isOrb3DMode}
             orbSettings={orbSettings}
@@ -1709,7 +1793,9 @@ const ModelCanvas: React.FC<{
             remoteOrbRotation={
               listenerMode || isBroadcaster ? remoteOrbRotation : null
             }
-            sphereDefaultRotationOffset={sphereDefaultRotationOffset}
+            useLocalAssetFallback={useLocalAssetFallback}
+            mediaSessionKey={mediaSessionKey}
+            transcriptSyncKey={transcriptSyncKey}
           />
         </Suspense>
       </Canvas>

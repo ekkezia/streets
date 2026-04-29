@@ -109,7 +109,10 @@ export const Move: React.FC<{
   const handleMove = () => {
     const search = window.location.search ?? "";
     onMove(currentModel + value);
-    router.push(`/${projectId}/${(currentModel + value).toString()}${search}`);
+    router.push(
+      `/${projectId}/${(currentModel + value).toString()}${search}`,
+      { scroll: false },
+    );
   };
 
   const getTooltip = () => {

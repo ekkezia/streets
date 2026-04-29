@@ -3,6 +3,7 @@
 import { CONFIG, ProjectId } from "@/config/config";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isVideoMediaUrl } from "../molecules/model-canvas-media";
 
 type TranscriptDictionary = Record<string, string>;
 
@@ -27,6 +28,19 @@ const getAudioPath = (projectId: ProjectId, index: number) => {
 
 const getTranscriptJsonPath = (projectId: ProjectId) => {
   return `/assets/transcriptions/${CONFIG[projectId].supabaseFolder}.json`;
+};
+const MEDIA_TRANSCRIPT_SYNC_EVENT = "streets-media-transcript-sync";
+
+const isVideoScene = (projectId: ProjectId, index: number) => {
+  const projectConfig = CONFIG[projectId];
+  const indexedMedia = projectConfig.mediaByIndex?.[index];
+  if (indexedMedia) {
+    return isVideoMediaUrl(indexedMedia);
+  }
+
+  const extension = projectConfig.supabaseMediaExtension ?? "jpg";
+  const prefix = projectConfig.mediaPrefixPath ?? projectConfig.supabasePrefixPath;
+  return isVideoMediaUrl(`${prefix}_${index}.${extension}`);
 };
 
 const normalizeTranscriptPayload = (payload: unknown): TranscriptDictionary => {
@@ -92,8 +106,17 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
   const [transcriptionMap, setTranscriptionMap] = useState<TranscriptDictionary>({});
   const [audioDurationSeconds, setAudioDurationSeconds] = useState(8);
   const [layoutToken, setLayoutToken] = useState(0);
+  const [transcriptSyncTick, setTranscriptSyncTick] = useState(0);
 
   const transcriptText = transcriptionMap[String(imageKey)] ?? "";
+  const shouldLoopWithMedia = useMemo(
+    () => isVideoScene(projectId, imageKey),
+    [imageKey, projectId],
+  );
+  const transcriptSyncKey = useMemo(
+    () => `${projectId}:${imageKey}`,
+    [imageKey, projectId],
+  );
 
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const transcriptTextRef = useRef<HTMLSpanElement | null>(null);
@@ -221,6 +244,10 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
       return;
     }
 
+    if (shouldLoopWithMedia && transcriptSyncTick === 0) {
+      return;
+    }
+
     const offsetFromCenter = (viewport.clientWidth + text.scrollWidth) / 2;
     const startX = offsetFromCenter;
     const endX = -offsetFromCenter;
@@ -235,17 +262,56 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
         duration: animationDurationMs,
         easing: "linear",
         fill: "forwards",
+        iterations: 1,
       },
     );
 
     return () => {
       animation.cancel();
     };
-  }, [audioDurationSeconds, imageKey, layoutToken, transcriptText]);
+  }, [
+    audioDurationSeconds,
+    imageKey,
+    layoutToken,
+    shouldLoopWithMedia,
+    transcriptSyncTick,
+    transcriptText,
+  ]);
+
+  useEffect(() => {
+    setTranscriptSyncTick(0);
+  }, [transcriptSyncKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !shouldLoopWithMedia) {
+      return;
+    }
+
+    const handleTranscriptSync = (event: Event) => {
+      const customEvent = event as CustomEvent<{ key?: string }>;
+      if (customEvent.detail?.key !== transcriptSyncKey) {
+        return;
+      }
+
+      setTranscriptSyncTick((current) => current + 1);
+    };
+
+    window.addEventListener(
+      MEDIA_TRANSCRIPT_SYNC_EVENT,
+      handleTranscriptSync as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        MEDIA_TRANSCRIPT_SYNC_EVENT,
+        handleTranscriptSync as EventListener,
+      );
+    };
+  }, [shouldLoopWithMedia, transcriptSyncKey]);
 
   return (
     <div
-      className="fixed z-[200] rounded-md border-2 border-white bg-black/75 p-2 text-white shadow-md"
+      className="fixed z-[200]"
       style={
         isOrbLikeView
           ? {
@@ -259,8 +325,7 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
               transform: "translateY(-50%) rotate(-90deg)",
               transformOrigin: "center center",
               width: isTouchLandscapeOrbView ? "80vh" : width,
-              minHeight: height,
-              border: "none",
+              // minHeight: height,
             }
           : {
               bottom: "var(--overlay-transcript-vertical, 8px)",
@@ -274,7 +339,10 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
     >
       <div
         ref={transcriptViewportRef}
-        className={`relative flex h-14 items-center justify-center overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 text-[14px] leading-7 ${
+        className={
+          `
+          border-2 border-white/50 bg-gray-900/65
+          rounded-md relative flex h-14 items-center justify-center overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 leading-7 ${
           isOrbLikeView ? "rotate-180" : ""
         }`}
       >
@@ -285,7 +353,7 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
         ) : (
           <span
             ref={transcriptTextRef}
-            className="absolute left-1/2 top-1/2 text-center text-white"
+            className="text-xl absolute left-1/2 top-1/2 text-center text-white"
           >
             {transcriptText}
           </span>

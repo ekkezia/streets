@@ -16,31 +16,140 @@ import {
   rememberAudioUnlock,
 } from "./model-canvas-media";
 
-export const useActiveMediaTexture = (mediaUrl: string) => {
+type SharedVideoSession = {
+  videoElement: HTMLVideoElement;
+  videoTexture: VideoTexture;
+  pairedAudioController: ReturnType<typeof createPairedAudioController>;
+  audioUnlocked: boolean;
+  transcriptSyncKey?: string;
+};
+
+const sharedVideoSessions = new Map<string, SharedVideoSession>();
+let globalAudioUnlockListenersBound = false;
+const MEDIA_TRANSCRIPT_SYNC_EVENT = "streets-media-transcript-sync";
+
+const emitTranscriptSync = (transcriptSyncKey?: string) => {
+  if (!transcriptSyncKey || typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(MEDIA_TRANSCRIPT_SYNC_EVENT, {
+      detail: { key: transcriptSyncKey },
+    }),
+  );
+};
+
+const bindGlobalAudioUnlockListeners = () => {
+  if (typeof window === "undefined" || globalAudioUnlockListenersBound) {
+    return;
+  }
+
+  const unlockAllSessions = () => {
+    rememberAudioUnlock();
+
+    sharedVideoSessions.forEach((session) => {
+      const target = session.videoElement;
+      target.muted = false;
+      void target
+        .play()
+        .then(async () => {
+          const pairedAudioStarted = await session.pairedAudioController.syncAndPlay();
+          if (pairedAudioStarted) {
+            session.audioUnlocked = true;
+            emitTranscriptSync(session.transcriptSyncKey);
+          }
+        })
+        .catch(() => {
+          // Keep muted fallback when browser policy still blocks playback.
+          target.muted = true;
+          session.pairedAudioController.pause();
+          void target.play().catch(() => {
+            // Ignore autoplay failure for muted fallback.
+          });
+        });
+    });
+  };
+
+  window.addEventListener("pointerdown", unlockAllSessions);
+  window.addEventListener("keydown", unlockAllSessions);
+  window.addEventListener("touchstart", unlockAllSessions);
+  globalAudioUnlockListenersBound = true;
+};
+
+const getOrCreateSharedVideoSession = (sessionKey: string): SharedVideoSession => {
+  const cached = sharedVideoSessions.get(sessionKey);
+  if (cached) {
+    return cached;
+  }
+
+  const videoElement = document.createElement("video");
+  videoElement.crossOrigin = "anonymous";
+  videoElement.loop = true;
+  videoElement.autoplay = true;
+  videoElement.playsInline = true;
+  videoElement.setAttribute("playsinline", "true");
+  videoElement.setAttribute("webkit-playsinline", "true");
+  videoElement.preload = "auto";
+  videoElement.volume = 1;
+  videoElement.muted = !isAudioUnlockRemembered();
+
+  const pairedAudioController = createPairedAudioController(videoElement);
+  pairedAudioController.bindVideoEvents();
+
+  const videoTexture = new VideoTexture(videoElement);
+  videoTexture.colorSpace = SRGBColorSpace;
+  videoTexture.minFilter = LinearFilter;
+  videoTexture.magFilter = LinearFilter;
+  videoTexture.generateMipmaps = false;
+
+  const nextSession: SharedVideoSession = {
+    videoElement,
+    videoTexture,
+    pairedAudioController,
+    audioUnlocked: isAudioUnlockRemembered(),
+    transcriptSyncKey: undefined,
+  };
+
+  sharedVideoSessions.set(sessionKey, nextSession);
+  bindGlobalAudioUnlockListeners();
+  return nextSession;
+};
+
+const pauseSharedVideoSession = (sessionKey: string) => {
+  const session = sharedVideoSessions.get(sessionKey);
+  if (!session) {
+    return;
+  }
+
+  session.videoElement.pause();
+  session.pairedAudioController.pause();
+};
+
+export const useActiveMediaTexture = (
+  mediaUrl: string,
+  useLocalAssetFallback = false,
+  sessionKey = "default",
+  transcriptSyncKey?: string,
+) => {
   const [activeTexture, setActiveTexture] = useState<Texture | null>(null);
 
   useEffect(() => {
     let disposed = false;
-    let localVideoElement: HTMLVideoElement | null = null;
     let localTexture: Texture | null = null;
-    let pairedAudioController: ReturnType<typeof createPairedAudioController> | null = null;
-    const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
+    let cleanupVideoHandlers: (() => void) | null = null;
+    let cleanupAudioHandlers: (() => void) | null = null;
+    const fallbackMediaUrl = useLocalAssetFallback
+      ? getLocalAssetFallbackPath(mediaUrl)
+      : null;
 
     if (isVideoMediaUrl(mediaUrl)) {
-      const videoElement = document.createElement("video");
-      videoElement.crossOrigin = "anonymous";
-      videoElement.loop = true;
-      videoElement.muted = !isAudioUnlockRemembered();
-      videoElement.volume = 1;
-      videoElement.autoplay = true;
-      videoElement.playsInline = true;
-      videoElement.setAttribute("playsinline", "true");
-      videoElement.setAttribute("webkit-playsinline", "true");
-      videoElement.preload = "auto";
-      pairedAudioController = createPairedAudioController(videoElement);
+      const session = getOrCreateSharedVideoSession(sessionKey);
+      const videoElement = session.videoElement;
+      const pairedAudioController = session.pairedAudioController;
       let hasAttemptedFallback = false;
-      let audioUnlocked = isAudioUnlockRemembered();
-      const unbindPairedAudioVideoEvents = pairedAudioController.bindVideoEvents();
+      session.audioUnlocked = session.audioUnlocked || isAudioUnlockRemembered();
+      session.transcriptSyncKey = transcriptSyncKey;
 
       const attemptPlayback = async (preferUnmuted: boolean) => {
         if (disposed) {
@@ -51,9 +160,12 @@ export const useActiveMediaTexture = (mediaUrl: string) => {
           videoElement.muted = false;
           try {
             await videoElement.play();
-            await pairedAudioController?.syncAndPlay();
-            audioUnlocked = true;
-            rememberAudioUnlock();
+            const pairedAudioStarted = await pairedAudioController?.syncAndPlay();
+            if (pairedAudioStarted) {
+              session.audioUnlocked = true;
+              rememberAudioUnlock();
+              emitTranscriptSync(session.transcriptSyncKey);
+            }
             return true;
           } catch {
             // Continue with muted fallback for Safari/iPad autoplay policy.
@@ -61,7 +173,6 @@ export const useActiveMediaTexture = (mediaUrl: string) => {
         }
 
         videoElement.muted = true;
-        audioUnlocked = false;
         pairedAudioController?.pause();
         try {
           await videoElement.play();
@@ -72,27 +183,43 @@ export const useActiveMediaTexture = (mediaUrl: string) => {
         return false;
       };
 
-      const tryUnlockVideoAudio = () => {
+      const setVideoSource = (nextSource: string) => {
+        pairedAudioController?.setSource(nextSource);
+        if (videoElement.src !== nextSource) {
+          videoElement.src = nextSource;
+          videoElement.load();
+        }
+        const shouldPreferUnmuted =
+          session.audioUnlocked || isAudioUnlockRemembered();
+        void attemptPlayback(shouldPreferUnmuted);
+      };
+
+      const unbindPairedAudioPlay = pairedAudioController.bindPairedAudioPlay(() => {
+        session.audioUnlocked = true;
+        emitTranscriptSync(session.transcriptSyncKey);
+      });
+      const unbindPairedAudioLoop = pairedAudioController.bindPairedAudioLoop(() => {
+        if (session.audioUnlocked && !videoElement.muted) {
+          emitTranscriptSync(session.transcriptSyncKey);
+        }
+      });
+      cleanupAudioHandlers = () => {
+        unbindPairedAudioPlay();
+        unbindPairedAudioLoop();
+      };
+
+      const retryUnmutedPlaybackIfUnlocked = () => {
         if (disposed) {
           return;
         }
 
-        if (audioUnlocked && !videoElement.muted && !videoElement.paused) {
+        const shouldPreferUnmuted =
+          session.audioUnlocked || isAudioUnlockRemembered();
+        if (!shouldPreferUnmuted) {
           return;
         }
 
         void attemptPlayback(true);
-      };
-
-      const handleUserInteractionForAudio = () => {
-        tryUnlockVideoAudio();
-      };
-
-      const setVideoSource = (nextSource: string) => {
-        pairedAudioController?.setSource(nextSource);
-        videoElement.src = nextSource;
-        videoElement.load();
-        void attemptPlayback(audioUnlocked);
       };
 
       const handleVideoError = () => {
@@ -110,32 +237,22 @@ export const useActiveMediaTexture = (mediaUrl: string) => {
       };
 
       videoElement.addEventListener("error", handleVideoError);
-      window.addEventListener("pointerdown", handleUserInteractionForAudio);
-      window.addEventListener("keydown", handleUserInteractionForAudio);
-      window.addEventListener("touchstart", handleUserInteractionForAudio);
-
-      const videoTexture = new VideoTexture(videoElement);
-      videoTexture.colorSpace = SRGBColorSpace;
-      videoTexture.minFilter = LinearFilter;
-      videoTexture.magFilter = LinearFilter;
-      videoTexture.generateMipmaps = false;
-
-      localVideoElement = videoElement;
-      localTexture = videoTexture;
-      setActiveTexture(videoTexture);
-      setVideoSource(mediaUrl);
-
-      const cleanupVideoEvents = () => {
+      videoElement.addEventListener("loadedmetadata", retryUnmutedPlaybackIfUnlocked);
+      videoElement.addEventListener("canplay", retryUnmutedPlaybackIfUnlocked);
+      cleanupVideoHandlers = () => {
         videoElement.removeEventListener("error", handleVideoError);
-        unbindPairedAudioVideoEvents();
-        window.removeEventListener("pointerdown", handleUserInteractionForAudio);
-        window.removeEventListener("keydown", handleUserInteractionForAudio);
-        window.removeEventListener("touchstart", handleUserInteractionForAudio);
+        videoElement.removeEventListener(
+          "loadedmetadata",
+          retryUnmutedPlaybackIfUnlocked,
+        );
+        videoElement.removeEventListener("canplay", retryUnmutedPlaybackIfUnlocked);
       };
 
-      (videoElement as HTMLVideoElement & { __cleanupVideoEvents?: () => void }).__cleanupVideoEvents =
-        cleanupVideoEvents;
+      setActiveTexture(session.videoTexture);
+      setVideoSource(mediaUrl);
     } else {
+      pauseSharedVideoSession(sessionKey);
+
       const loader = new TextureLoader();
       let hasAttemptedFallback = false;
 
@@ -179,20 +296,10 @@ export const useActiveMediaTexture = (mediaUrl: string) => {
         localTexture.dispose();
       }
 
-      if (localVideoElement) {
-        (
-          localVideoElement as HTMLVideoElement & {
-            __cleanupVideoEvents?: () => void;
-          }
-        ).__cleanupVideoEvents?.();
-        localVideoElement.pause();
-        localVideoElement.src = "";
-        localVideoElement.load();
-      }
-
-      pairedAudioController?.dispose();
+      cleanupVideoHandlers?.();
+      cleanupAudioHandlers?.();
     };
-  }, [mediaUrl]);
+  }, [mediaUrl, sessionKey, transcriptSyncKey, useLocalAssetFallback]);
 
   return activeTexture;
 };

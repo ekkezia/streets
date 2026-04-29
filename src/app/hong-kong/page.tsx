@@ -11,7 +11,7 @@ export default function Home() {
           imageId={"1"}
           className="h-[50vh] w-screen items-start justify-center sm:h-screen sm:w-1/2"
           column={"1"}
-           scale={[-1, 1, -1]}
+          rotation={[0, -Math.PI / 2, -Math.PI/4]}
         />
         <ModelCanvas
           projectId="hong-kong"
@@ -19,7 +19,7 @@ export default function Home() {
           className="canvas h-[50vh] w-screen items-start justify-center sm:h-screen sm:w-1/2"
           doubleBy={38}
           column={"2"}
-          scale={[-1, 1, -1]}
+          rotation={[0, -Math.PI / 2, -Math.PI/4]}
         />
       </main>
     </CarousellContextProvider>

@@ -261,7 +261,7 @@ const LocationMap: React.FC<{
     <div>
       {!isTouchLandscapeOrbView && (
         <div
-          className={`fixed rounded-md border-2 border-white bg-gray-900/60 px-2 py-1 text-[11px] text-white shadow-sm ${
+          className={`fixed rounded-md border-2 border-white/50 bg-gray-900/60 px-2 py-1 text-[11px] text-white shadow-sm ${
             isOrbLikeView ? "z-[201]" : "right-2 top-2 z-[198]"
           }`}
           style={
@@ -298,10 +298,10 @@ const LocationMap: React.FC<{
           }))
         }
         style={{
-          width: width,
+          width: isOrbLikeView ? width : 'clamp(24vw, 25vw, 150px)',
           border: "2px solid white",
           borderRadius: 8,
-          height: height,
+          height: isOrbLikeView ? height : 'clamp(16vw, 20vw, 120px)',
           position: "fixed",
           bottom: isTouchLandscapeOrbView
             ? undefined
@@ -399,7 +399,7 @@ const LocationMap: React.FC<{
                     )
                   }
                   aria-label={`Jump to image ${point.key}`}
-                  className={`h-5 w-5 cursor-pointer rounded-full border border-white/90 shadow-md transition pointer-events-auto ${
+                  className={`h-5 w-5 cursor-pointer rounded-full border border-white/50 shadow-md transition pointer-events-auto ${
                     isCurrent
                       ? "bg-cyan-300 ring-2 ring-cyan-100/80"
                       : isVisited

@@ -18,13 +18,13 @@ export default function Page({ params }: { params: { id: string } }) {
         projectId="hong-kong"
         imageId={params.id}
         column="2"
-        scale={[-1, 1, -1]}
+        rotation={[0, -Math.PI / 2, -Math.PI/4]}
       />
       <ModelCanvas
         projectId="hong-kong"
         imageId={params.id}
         column="1"
-        scale={[-1, 1, -1]}
+        rotation={[0, -Math.PI / 2, -Math.PI/4]}
         doubleBy={38}
       />
     </main>

@@ -13,6 +13,7 @@ import {
 type EquirectangularViewProps = {
   mediaUrl: string;
   isVideo: boolean;
+  useLocalAssetFallback?: boolean;
   currentMoves: DirectionTuple[];
   onMove: (value: number) => void;
 };
@@ -44,10 +45,13 @@ const getMoveLabel = (
 const EquirectangularView: React.FC<EquirectangularViewProps> = ({
   mediaUrl,
   isVideo,
+  useLocalAssetFallback = false,
   currentMoves,
   onMove,
 }) => {
-  const fallbackMediaUrl = getLocalAssetFallbackPath(mediaUrl);
+  const fallbackMediaUrl = useLocalAssetFallback
+    ? getLocalAssetFallbackPath(mediaUrl)
+    : null;
   const [resolvedMediaUrl, setResolvedMediaUrl] = useState(mediaUrl);
   const [videoMuted, setVideoMuted] = useState(() => !isAudioUnlockRemembered());
   const videoRef = useRef<HTMLVideoElement | null>(null);

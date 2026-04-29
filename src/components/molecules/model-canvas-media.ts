@@ -178,7 +178,7 @@ export const createPairedAudioController = (videoElement: HTMLVideoElement) => {
   const syncAndPlay = async () => {
     if (!pairedAudioElement.src || videoElement.muted || videoElement.paused) {
       pause();
-      return;
+      return false;
     }
 
     pairedAudioElement.muted = false;
@@ -187,9 +187,39 @@ export const createPairedAudioController = (videoElement: HTMLVideoElement) => {
 
     try {
       await pairedAudioElement.play();
+      return true;
     } catch {
       // Ignore autoplay failures for auxiliary audio.
+      return false;
     }
+  };
+
+  const bindPairedAudioPlay = (onPlay: () => void) => {
+    pairedAudioElement.addEventListener("playing", onPlay);
+    return () => {
+      pairedAudioElement.removeEventListener("playing", onPlay);
+    };
+  };
+
+  const bindPairedAudioLoop = (onLoop: () => void) => {
+    let previousTime = pairedAudioElement.currentTime;
+    const handleTimeUpdate = () => {
+      const currentTime = pairedAudioElement.currentTime;
+      if (
+        !pairedAudioElement.paused &&
+        Number.isFinite(currentTime) &&
+        Number.isFinite(previousTime) &&
+        currentTime + 0.25 < previousTime
+      ) {
+        onLoop();
+      }
+      previousTime = currentTime;
+    };
+
+    pairedAudioElement.addEventListener("timeupdate", handleTimeUpdate);
+    return () => {
+      pairedAudioElement.removeEventListener("timeupdate", handleTimeUpdate);
+    };
   };
 
   const setSource = (videoSource: string) => {
@@ -238,6 +268,8 @@ export const createPairedAudioController = (videoElement: HTMLVideoElement) => {
 
   return {
     bindVideoEvents,
+    bindPairedAudioLoop,
+    bindPairedAudioPlay,
     dispose,
     pause,
     setSource,
