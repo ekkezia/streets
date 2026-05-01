@@ -50,6 +50,7 @@ const bindGlobalAudioUnlockListeners = () => {
 
     sharedVideoSessions.forEach((session) => {
       const target = session.videoElement;
+      const wasAudioUnlocked = session.audioUnlocked;
       target.muted = false;
       void target
         .play()
@@ -57,7 +58,9 @@ const bindGlobalAudioUnlockListeners = () => {
           const pairedAudioStarted = await session.pairedAudioController.syncAndPlay();
           if (pairedAudioStarted) {
             session.audioUnlocked = true;
-            emitTranscriptSync(session.transcriptSyncKey);
+            if (!wasAudioUnlocked) {
+              emitTranscriptSync(session.transcriptSyncKey);
+            }
           }
         })
         .catch(() => {
@@ -148,6 +151,7 @@ export const useActiveMediaTexture = (
       const videoElement = session.videoElement;
       const pairedAudioController = session.pairedAudioController;
       let hasAttemptedFallback = false;
+      let hasDispatchedInitialTranscriptSync = false;
       session.audioUnlocked = session.audioUnlocked || isAudioUnlockRemembered();
       session.transcriptSyncKey = transcriptSyncKey;
 
@@ -158,13 +162,17 @@ export const useActiveMediaTexture = (
 
         if (preferUnmuted) {
           videoElement.muted = false;
+          const wasAudioUnlocked = session.audioUnlocked;
           try {
             await videoElement.play();
             const pairedAudioStarted = await pairedAudioController?.syncAndPlay();
             if (pairedAudioStarted) {
               session.audioUnlocked = true;
               rememberAudioUnlock();
-              emitTranscriptSync(session.transcriptSyncKey);
+              if (!hasDispatchedInitialTranscriptSync || !wasAudioUnlocked) {
+                hasDispatchedInitialTranscriptSync = true;
+                emitTranscriptSync(session.transcriptSyncKey);
+              }
             }
             return true;
           } catch {
@@ -186,6 +194,7 @@ export const useActiveMediaTexture = (
       const setVideoSource = (nextSource: string) => {
         pairedAudioController?.setSource(nextSource);
         if (videoElement.src !== nextSource) {
+          hasDispatchedInitialTranscriptSync = false;
           videoElement.src = nextSource;
           videoElement.load();
         }
@@ -195,8 +204,12 @@ export const useActiveMediaTexture = (
       };
 
       const unbindPairedAudioPlay = pairedAudioController.bindPairedAudioPlay(() => {
+        const wasAudioUnlocked = session.audioUnlocked;
         session.audioUnlocked = true;
-        emitTranscriptSync(session.transcriptSyncKey);
+        if (!hasDispatchedInitialTranscriptSync || !wasAudioUnlocked) {
+          hasDispatchedInitialTranscriptSync = true;
+          emitTranscriptSync(session.transcriptSyncKey);
+        }
       });
       const unbindPairedAudioLoop = pairedAudioController.bindPairedAudioLoop(() => {
         if (session.audioUnlocked && !videoElement.muted) {
