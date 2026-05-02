@@ -2,7 +2,14 @@
 
 import { CONFIG, ProjectId } from "@/config/config";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { isVideoMediaUrl } from "../molecules/model-canvas-media";
 
 type TranscriptDictionary = Record<string, string>;
@@ -20,16 +27,11 @@ const parseImageKeyFromPathname = (pathname: string): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 };
 
-const getAudioPath = (projectId: ProjectId, index: number) => {
-  const projectConfig = CONFIG[projectId];
-  const prefix = projectConfig.mediaPrefixPath ?? projectConfig.supabasePrefixPath;
-  return `/assets/audio/${projectConfig.supabaseFolder}/${prefix}_${index}.m4a`;
-};
-
 const getTranscriptJsonPath = (projectId: ProjectId) => {
   return `/assets/transcriptions/${CONFIG[projectId].supabaseFolder}.json`;
 };
 const MEDIA_TRANSCRIPT_SYNC_EVENT = "streets-media-transcript-sync";
+const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
 
 const isVideoScene = (projectId: ProjectId, index: number) => {
   const projectConfig = CONFIG[projectId];
@@ -88,6 +90,31 @@ const isTouchLandscape = () => {
   return hasTouch && window.innerWidth >= window.innerHeight;
 };
 
+const detectTouchDevice = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return (
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
+    "ontouchstart" in window ||
+    window.matchMedia?.("(pointer: coarse)").matches
+  );
+};
+
+const parseCssVarPx = (name: string, fallback: number) => {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  const rawValue = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  const numericValue = Number.parseFloat(rawValue);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+};
+
 const MediaTranscript: React.FC<MediaTranscriptProps> = ({
   projectId,
   width = "50vw",
@@ -99,16 +126,21 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
     () => getTranscriptJsonPath(projectId),
     [projectId],
   );
-  const audioUrl = useMemo(() => getAudioPath(projectId, imageKey), [projectId, imageKey]);
 
   const [isOrbLikeView, setIsOrbLikeView] = useState(false);
   const [isTouchLandscapeOrbView, setIsTouchLandscapeOrbView] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [overlayPositionEditEnabled, setOverlayPositionEditEnabled] =
+    useState(false);
   const [transcriptionMap, setTranscriptionMap] = useState<TranscriptDictionary>({});
-  const [audioDurationSeconds, setAudioDurationSeconds] = useState(8);
   const [layoutToken, setLayoutToken] = useState(0);
   const [transcriptSyncTick, setTranscriptSyncTick] = useState(0);
 
   const transcriptText = transcriptionMap[String(imageKey)] ?? "";
+  const audioDurationSeconds = useMemo(
+    () => estimateDurationFromText(transcriptText),
+    [transcriptText],
+  );
   const shouldLoopWithMedia = useMemo(
     () => isVideoScene(projectId, imageKey),
     [imageKey, projectId],
@@ -120,6 +152,13 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
 
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const transcriptTextRef = useRef<HTMLSpanElement | null>(null);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startRight: number;
+    startVertical: number;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,47 +194,6 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
   }, [transcriptJsonPath]);
 
   useEffect(() => {
-    let cancelled = false;
-    const fallbackDuration = estimateDurationFromText(transcriptText);
-
-    const audioElement = document.createElement("audio");
-    audioElement.preload = "metadata";
-
-    const finalizeDuration = (durationSeconds: number) => {
-      if (cancelled) {
-        return;
-      }
-      setAudioDurationSeconds(Math.max(1, durationSeconds));
-    };
-
-    const handleLoadedMetadata = () => {
-      const durationSeconds = Number(audioElement.duration);
-      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-        finalizeDuration(fallbackDuration);
-        return;
-      }
-      finalizeDuration(durationSeconds);
-    };
-
-    const handleError = () => {
-      finalizeDuration(fallbackDuration);
-    };
-
-    audioElement.addEventListener("loadedmetadata", handleLoadedMetadata);
-    audioElement.addEventListener("error", handleError);
-    audioElement.src = audioUrl;
-    audioElement.load();
-
-    return () => {
-      cancelled = true;
-      audioElement.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      audioElement.removeEventListener("error", handleError);
-      audioElement.src = "";
-      audioElement.load();
-    };
-  }, [audioUrl, transcriptText]);
-
-  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -206,6 +204,10 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
       const nextIsOrbLikeView = view === "orb" || view === "orb3d";
       setIsOrbLikeView(nextIsOrbLikeView);
       setIsTouchLandscapeOrbView(nextIsOrbLikeView && isTouchLandscape());
+      setIsTouchDevice(detectTouchDevice());
+      setOverlayPositionEditEnabled(
+        parseCssVarPx("--overlay-position-edit-enabled", 0) > 0.5,
+      );
     };
 
     syncViewMode();
@@ -217,6 +219,30 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
       window.removeEventListener("resize", syncViewMode);
     };
   }, [pathname]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleOverlayEditEvent = () => {
+      setOverlayPositionEditEnabled(
+        parseCssVarPx("--overlay-position-edit-enabled", 0) > 0.5,
+      );
+    };
+
+    window.addEventListener(
+      "streets-overlay-position-edit-mode-change",
+      handleOverlayEditEvent,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "streets-overlay-position-edit-mode-change",
+        handleOverlayEditEvent,
+      );
+    };
+  }, []);
 
   useEffect(() => {
     const viewport = transcriptViewportRef.current;
@@ -309,9 +335,94 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
     };
   }, [shouldLoopWithMedia, transcriptSyncKey]);
 
+  const canDragTranscriptPosition =
+    isOrbLikeView && isTouchDevice && overlayPositionEditEnabled;
+
+  const updateTranscriptOverlayPosition = useCallback(
+    (right: number, vertical: number) => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const root = document.documentElement;
+      root.style.setProperty("--overlay-transcript-right", `${right}px`);
+      root.style.setProperty("--overlay-transcript-vertical", `${vertical}px`);
+      window.dispatchEvent(
+        new CustomEvent(OVERLAY_LAYOUT_CHANGE_EVENT, {
+          detail: {
+            transcriptRight: right,
+            transcriptVertical: vertical,
+          },
+        }),
+      );
+    },
+    [],
+  );
+
+  const handleTranscriptDragStart = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!canDragTranscriptPosition) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const startRight = parseCssVarPx("--overlay-transcript-right", 30);
+      const startVertical = parseCssVarPx("--overlay-transcript-vertical", 0);
+      dragStateRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        startRight,
+        startVertical,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [canDragTranscriptPosition],
+  );
+
+  const handleTranscriptDragMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const dragState = dragStateRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      const deltaX = event.clientX - dragState.startX;
+      const deltaY = event.clientY - dragState.startY;
+      const nextRight = isTouchLandscapeOrbView
+        ? dragState.startRight + deltaX
+        : dragState.startRight - deltaX;
+      const nextVertical = dragState.startVertical + deltaY;
+      updateTranscriptOverlayPosition(nextRight, nextVertical);
+    },
+    [isTouchLandscapeOrbView, updateTranscriptOverlayPosition],
+  );
+
+  const handleTranscriptDragEnd = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const dragState = dragStateRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      dragStateRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [],
+  );
+
   return (
     <div
       className="fixed z-[200]"
+      onPointerDown={handleTranscriptDragStart}
+      onPointerMove={handleTranscriptDragMove}
+      onPointerUp={handleTranscriptDragEnd}
+      onPointerCancel={handleTranscriptDragEnd}
       style={
         isOrbLikeView
           ? {
@@ -324,8 +435,8 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
                 : undefined,
               transform: "translateY(-50%) rotate(-90deg)",
               transformOrigin: "center center",
-              width: isTouchLandscapeOrbView ? "80vh" : width,
-              // minHeight: height,
+              width: isTouchLandscapeOrbView ? "82vh" : width,
+              touchAction: canDragTranscriptPosition ? "none" : "auto",
             }
           : {
               bottom: "var(--overlay-transcript-vertical, 8px)",
@@ -334,6 +445,7 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
                 "translateX(calc(-50% + var(--overlay-transcript-center-offset, 0px)))",
               width,
               minHeight: height,
+              touchAction: canDragTranscriptPosition ? "none" : "auto",
             }
       }
     >
@@ -342,9 +454,9 @@ const MediaTranscript: React.FC<MediaTranscriptProps> = ({
         className={
           `
           border-2 border-white/50 bg-gray-900/70
-          rounded-md relative flex h-14 items-center justify-center overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 leading-7 ${
-          isOrbLikeView ? "rotate-180" : ""
-        }`}
+          rounded-md relative flex h-16 items-center justify-center overflow-hidden whitespace-nowrap rounded bg-white/10 px-2 py-1 leading-7 ${
+          isOrbLikeView ? "rotate-0" : ""
+        } ${canDragTranscriptPosition ? "border-cyan-300/80 bg-cyan-300/10" : ""}`}
       >
         {transcriptText.length === 0 ? (
           <span className="text-xl text-center text-white/70">

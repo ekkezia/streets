@@ -2,7 +2,15 @@
 
 import { useFrame } from "@react-three/fiber";
 import React, { useEffect, useRef } from "react";
-import { DoubleSide, Group, MathUtils, Quaternion, Texture, Vector3 } from "three";
+import {
+  DoubleSide,
+  Euler,
+  Group,
+  MathUtils,
+  Quaternion,
+  Texture,
+  Vector3,
+} from "three";
 import type { TrackedSubject } from "./subject-presence";
 
 export type GlassOrbSettings = {
@@ -17,26 +25,35 @@ export type GlassOrbSettings = {
 export type OrbRotationSnapshot = {
   yaw: number;
   xRotation: number;
+  zRotation: number;
 };
 
+export type HeadAxisMapping = "xRotation" | "yaw" | "zRotation";
+export type HeadXAxisMapping = HeadAxisMapping;
+export type HeadYAxisMapping = HeadAxisMapping;
+
 export const DEFAULT_GLASS_ORB_SETTINGS: GlassOrbSettings = {
-  radius: 2.2,
-  yaw: 1.7,
-  xRotation: -1.6,
-  zRotation: 6,
-  xOffset: 1.8,
-  yOffset: 0,
+  radius: 2.58,
+  yaw: 0,
+  xRotation: 0,
+  zRotation: 0,
+  xOffset: 2.5,
+  yOffset: -0.1,
 };
 
 const POINTER_YAW_RANGE = Math.PI;
 const POINTER_TILT_RANGE = Math.PI;
 const ROTATION_SMOOTHING = 10;
 const POSITION_SMOOTHING = 8;
-const HEAD_ROTATE_YAW_RANGE = Math.PI * 1.1;
+const HEAD_ROTATE_PITCH_RANGE = Math.PI * 0.98;
+const HEAD_ROTATE_YAW_RANGE = Math.PI * 0.98;
 const HEAD_ROTATE_TILT_RANGE = Math.PI * 0.75;
+const HEAD_INPUT_DEADZONE = 0.025;
+const HEAD_CROSSTALK_DAMPING = 0.28;
 const MARKER_INPUT_GAIN_X = 2.35;
 const MARKER_INPUT_GAIN_Y = 2.1;
 const MARKER_FORWARD = new Vector3(0, 0, 1);
+const EULER_ORDER: "YXZ" = "YXZ";
 
 const GlassOrbProjection: React.FC<{
   texture: Texture;
@@ -44,6 +61,12 @@ const GlassOrbProjection: React.FC<{
   trackedSubjects?: TrackedSubject[];
   headFollowPositionEnabled?: boolean;
   headFollowPositionStrength?: number;
+  headXAxisMapping?: HeadXAxisMapping;
+  headYAxisMapping?: HeadYAxisMapping;
+  isolateHeadXDebug?: boolean;
+  isolateHeadYDebug?: boolean;
+  showRotationAxes?: boolean;
+  pointerControlEnabled?: boolean;
   listenerMode?: boolean;
   allowPointerControlInListenerMode?: boolean;
   remoteRotation?: OrbRotationSnapshot | null;
@@ -54,26 +77,27 @@ const GlassOrbProjection: React.FC<{
   trackedSubjects = [],
   headFollowPositionEnabled = false,
   headFollowPositionStrength = 1,
+  headXAxisMapping = "xRotation",
+  headYAxisMapping = "yaw",
+  isolateHeadXDebug = false,
+  isolateHeadYDebug = false,
+  showRotationAxes = false,
+  pointerControlEnabled = true,
   listenerMode = false,
   allowPointerControlInListenerMode = false,
   remoteRotation = null,
   onRotationChange,
 }) => {
   const orbGroupRef = useRef<Group>(null);
-  const currentYawRef = useRef(settings.yaw);
-  const currentXRotationRef = useRef(settings.xRotation);
-  const currentZRotationRef = useRef(settings.zRotation);
+  const currentOrientationRef = useRef(new Quaternion());
+  const hasInitializedOrientationRef = useRef(false);
   const currentPositionXRef = useRef(0);
   const currentPositionYRef = useRef(0);
-
-  useEffect(() => {
-    if (!orbGroupRef.current) {
-      return;
-    }
-
-    // Apply yaw first, then pitch, then roll so X/Z controls feel less coupled.
-    orbGroupRef.current.rotation.order = "YXZ";
-  }, []);
+  const baseEulerRef = useRef(new Euler(0, 0, 0, EULER_ORDER));
+  const offsetEulerRef = useRef(new Euler(0, 0, 0, EULER_ORDER));
+  const baseQuaternionRef = useRef(new Quaternion());
+  const offsetQuaternionRef = useRef(new Quaternion());
+  const targetQuaternionRef = useRef(new Quaternion());
 
   const activeSubject = trackedSubjects.reduce<TrackedSubject | null>(
     (best, subject) => {
@@ -97,52 +121,89 @@ const GlassOrbProjection: React.FC<{
 
     let targetPositionX = settings.xOffset;
     let targetPositionY = settings.yOffset;
-    let targetYaw = settings.yaw;
-    let targetXRotation = settings.xRotation;
-    let targetZRotation = settings.zRotation;
-    const pointerYawOffset = state.pointer.x * POINTER_YAW_RANGE;
-    const pointerTiltOffset = -state.pointer.y * POINTER_TILT_RANGE;
+    let yawOffset = 0;
+    let xRotationOffset = 0;
+    let zRotationOffset = 0;
+    const pointerYawOffset = pointerControlEnabled
+      ? state.pointer.x * POINTER_YAW_RANGE
+      : 0;
+    const pointerTiltOffset = pointerControlEnabled
+      ? -state.pointer.y * POINTER_TILT_RANGE
+      : 0;
 
     if (listenerMode) {
       if (remoteRotation) {
-        targetYaw = settings.yaw + remoteRotation.yaw;
-        targetXRotation = settings.xRotation + remoteRotation.xRotation;
+        yawOffset = remoteRotation.yaw;
+        xRotationOffset = remoteRotation.xRotation;
+        zRotationOffset = remoteRotation.zRotation;
       }
 
-      if (allowPointerControlInListenerMode) {
-        targetYaw += pointerYawOffset;
-        targetXRotation += pointerTiltOffset;
+      if (allowPointerControlInListenerMode && pointerControlEnabled) {
+        yawOffset += pointerYawOffset;
+        xRotationOffset += pointerTiltOffset;
       }
     } else {
       let headYawOffset = 0;
-      let headTiltOffset = 0;
+      let headPitchOffset = 0;
+      let headRollOffset = 0;
 
       if (headFollowPositionEnabled && activeSubject) {
         const normalizedX = MathUtils.clamp(activeSubject.x, 0, 1) - 0.5;
         const normalizedY = 0.5 - MathUtils.clamp(activeSubject.y, 0, 1);
         const headStrength = MathUtils.clamp(headFollowPositionStrength, 0, 2.5);
+        const absX = Math.abs(normalizedX);
+        const absY = Math.abs(normalizedY);
+        const xDominant = absX >= absY;
+        const yDominant = absY > absX;
+        const isolatedXInput =
+          absX < HEAD_INPUT_DEADZONE
+            ? 0
+            : normalizedX * (xDominant ? 1 : HEAD_CROSSTALK_DAMPING);
+        const isolatedYInput =
+          absY < HEAD_INPUT_DEADZONE
+            ? 0
+            : normalizedY * (yDominant ? 1 : HEAD_CROSSTALK_DAMPING);
 
-        headYawOffset = normalizedX * HEAD_ROTATE_YAW_RANGE * headStrength;
-        headTiltOffset = normalizedY * HEAD_ROTATE_TILT_RANGE * headStrength;
+        const applyToAxis = (axis: HeadAxisMapping, amount: number) => {
+          if (axis === "yaw") {
+            headYawOffset += amount;
+            return;
+          }
+          if (axis === "zRotation") {
+            headRollOffset += amount;
+            return;
+          }
+          headPitchOffset += amount;
+        };
+        const getAxisRange = (axis: HeadAxisMapping) => {
+          if (axis === "yaw") {
+            return HEAD_ROTATE_YAW_RANGE;
+          }
+          if (axis === "xRotation") {
+            return HEAD_ROTATE_PITCH_RANGE;
+          }
+          return HEAD_ROTATE_TILT_RANGE;
+        };
+
+        const shouldIsolateXOnly = isolateHeadXDebug && !isolateHeadYDebug;
+        const shouldIsolateYOnly = isolateHeadYDebug && !isolateHeadXDebug;
+        const headXAxisAmount = shouldIsolateYOnly
+          ? 0
+          : isolatedXInput * getAxisRange(headXAxisMapping) * headStrength;
+        const headYAxisAmount = shouldIsolateXOnly
+          ? 0
+          : isolatedYInput * getAxisRange(headYAxisMapping) * headStrength;
+        applyToAxis(headXAxisMapping, headXAxisAmount);
+        applyToAxis(headYAxisMapping, headYAxisAmount);
       }
 
-      targetYaw = settings.yaw + pointerYawOffset + headYawOffset;
-      targetXRotation = settings.xRotation + pointerTiltOffset + headTiltOffset;
+      yawOffset = pointerYawOffset + headYawOffset;
+      xRotationOffset = pointerTiltOffset + headPitchOffset;
+      zRotationOffset = headRollOffset;
     }
 
     const alpha = 1 - Math.exp(-ROTATION_SMOOTHING * delta);
     const positionAlpha = 1 - Math.exp(-POSITION_SMOOTHING * delta);
-    currentYawRef.current = MathUtils.lerp(currentYawRef.current, targetYaw, alpha);
-    currentXRotationRef.current = MathUtils.lerp(
-      currentXRotationRef.current,
-      targetXRotation,
-      alpha,
-    );
-    currentZRotationRef.current = MathUtils.lerp(
-      currentZRotationRef.current,
-      targetZRotation,
-      alpha,
-    );
 
     currentPositionXRef.current = MathUtils.lerp(
       currentPositionXRef.current,
@@ -155,10 +216,39 @@ const GlassOrbProjection: React.FC<{
       positionAlpha,
     );
 
-    orbGroupRef.current.rotation.set(
-      currentXRotationRef.current,
-      currentYawRef.current,
-      currentZRotationRef.current,
+    // Compose base and live offsets as separate quaternions.
+    // Adding Euler angles directly can couple channels and make one axis
+    // feel like it is "taking over" when another base axis is non-zero.
+    baseEulerRef.current.set(
+      settings.xRotation,
+      settings.yaw,
+      settings.zRotation,
+      EULER_ORDER,
+    );
+    offsetEulerRef.current.set(
+      xRotationOffset,
+      yawOffset,
+      zRotationOffset,
+      EULER_ORDER,
+    );
+    baseQuaternionRef.current.setFromEuler(baseEulerRef.current);
+    offsetQuaternionRef.current.setFromEuler(offsetEulerRef.current);
+    targetQuaternionRef.current
+      .copy(baseQuaternionRef.current)
+      .premultiply(offsetQuaternionRef.current);
+
+    if (!hasInitializedOrientationRef.current) {
+      currentOrientationRef.current.copy(targetQuaternionRef.current);
+      hasInitializedOrientationRef.current = true;
+    } else {
+      currentOrientationRef.current.slerp(targetQuaternionRef.current, alpha);
+    }
+
+    orbGroupRef.current.quaternion.copy(currentOrientationRef.current);
+    orbGroupRef.current.rotation.reorder(EULER_ORDER);
+    orbGroupRef.current.rotation.setFromQuaternion(
+      currentOrientationRef.current,
+      EULER_ORDER,
     );
     orbGroupRef.current.position.set(
       currentPositionXRef.current,
@@ -167,15 +257,19 @@ const GlassOrbProjection: React.FC<{
     );
 
     if (onRotationChange) {
+      // Send axis-pure offsets directly. Converting quaternion -> Euler can
+      // re-mix channels and make X-axis remaps appear unchanged on listeners.
       onRotationChange({
-        yaw: currentYawRef.current,
-        xRotation: currentXRotationRef.current,
+        yaw: yawOffset,
+        xRotation: xRotationOffset,
+        zRotation: zRotationOffset,
       });
     }
   });
 
   return (
     <group ref={orbGroupRef}>
+      {showRotationAxes && <axesHelper args={[settings.radius * 1.45]} />}
       <mesh>
         <sphereGeometry args={[settings.radius, 64, 64]} />
         <meshBasicMaterial map={texture} />

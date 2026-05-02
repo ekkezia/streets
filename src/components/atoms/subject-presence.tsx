@@ -39,7 +39,7 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
   enabled,
   cameraEnabled,
   cameraDeviceId,
-  flipX = false,
+  flipX = true,
   flipY = false,
   debugEnabled = false,
   cameraBackdropEnabled = false,

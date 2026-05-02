@@ -6,10 +6,14 @@ export const dynamic = "force-dynamic";
 const BROADCASTER_STALE_MS = 8000;
 const CAMERA_YAW_RANGE = Math.PI * 1.1;
 const CAMERA_TILT_RANGE = Math.PI * 0.75;
+const ROTATION_YAW_LIMIT = Math.PI * 4;
+const ROTATION_X_LIMIT = Math.PI * 2;
+const ROTATION_Z_LIMIT = Math.PI * 2;
 
 type OrbRotationState = {
   yaw: number;
   xRotation: number;
+  zRotation: number;
   updatedAt: number;
 };
 
@@ -204,8 +208,43 @@ export async function POST(request: Request) {
     const strength = clamp(confidenceValue ?? 1, 0, 1);
 
     state.rotation = {
-      yaw: normalizedX * CAMERA_YAW_RANGE * strength,
-      xRotation: normalizedY * CAMERA_TILT_RANGE * strength,
+      yaw: 0,
+      xRotation: -normalizedX * CAMERA_YAW_RANGE * strength,
+      zRotation: normalizedY * CAMERA_TILT_RANGE * strength,
+      updatedAt: Date.now(),
+    };
+    state.broadcasterLastSeen = Date.now();
+
+    return NextResponse.json(createSnapshot(state, true), {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    });
+  }
+
+  if (action === "rotation") {
+    if (state.broadcasterId !== clientId) {
+      return NextResponse.json(createSnapshot(state, false), {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      });
+    }
+
+    const yaw = toNumber(data.yaw);
+    const xRotation = toNumber(data.xRotation);
+    const zRotation = toNumber(data.zRotation);
+    if (yaw === null || xRotation === null) {
+      return NextResponse.json(
+        { ok: false, error: "invalid_rotation_payload" },
+        { status: 400 },
+      );
+    }
+
+    state.rotation = {
+      yaw: clamp(yaw, -ROTATION_YAW_LIMIT, ROTATION_YAW_LIMIT),
+      xRotation: clamp(xRotation, -ROTATION_X_LIMIT, ROTATION_X_LIMIT),
+      zRotation: clamp(zRotation ?? 0, -ROTATION_Z_LIMIT, ROTATION_Z_LIMIT),
       updatedAt: Date.now(),
     };
     state.broadcasterLastSeen = Date.now();

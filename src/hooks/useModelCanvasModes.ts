@@ -12,11 +12,13 @@ export type OverlayLayoutSettings = {
   transcriptCenterOffset: number;
 };
 
+const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
+
 const DEFAULT_OVERLAY_LAYOUT_SETTINGS: OverlayLayoutSettings = {
-  mapRight: -50,
-  mapVertical: 8,
-  transcriptRight: -35,
-  transcriptVertical: 0,
+  mapRight: 25,
+  mapVertical: 660,
+  transcriptRight: 640,
+  transcriptVertical: -12,
   transcriptCenterOffset: -30,
 };
 
@@ -32,6 +34,8 @@ export const useModelCanvasModes = ({
   const [viewMode, setViewMode] = useState<CanvasViewMode>("sphere");
   const [overlayLayoutSettings, setOverlayLayoutSettings] =
     useState<OverlayLayoutSettings>(DEFAULT_OVERLAY_LAYOUT_SETTINGS);
+  const [overlayPositionEditEnabled, setOverlayPositionEditEnabled] =
+    useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -78,7 +82,55 @@ export const useModelCanvasModes = ({
       "--overlay-transcript-center-offset",
       `${overlayLayoutSettings.transcriptCenterOffset}px`,
     );
-  }, [overlayLayoutSettings, viewMode]);
+    root.style.setProperty(
+      "--overlay-position-edit-enabled",
+      overlayPositionEditEnabled ? "1" : "0",
+    );
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("streets-overlay-position-edit-mode-change", {
+          detail: { enabled: overlayPositionEditEnabled },
+        }),
+      );
+    }
+  }, [overlayLayoutSettings, overlayPositionEditEnabled, viewMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleOverlayLayoutChange = (event: Event) => {
+      const customEvent = event as CustomEvent<Partial<OverlayLayoutSettings>>;
+      const detail = customEvent.detail ?? {};
+      setOverlayLayoutSettings((current) => {
+        const next: OverlayLayoutSettings = { ...current };
+        let hasChanged = false;
+
+        for (const key of Object.keys(next) as Array<keyof OverlayLayoutSettings>) {
+          const value = detail[key];
+          if (typeof value === "number" && Number.isFinite(value)) {
+            next[key] = value;
+            hasChanged = true;
+          }
+        }
+
+        return hasChanged ? next : current;
+      });
+    };
+
+    window.addEventListener(
+      OVERLAY_LAYOUT_CHANGE_EVENT,
+      handleOverlayLayoutChange as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        OVERLAY_LAYOUT_CHANGE_EVENT,
+        handleOverlayLayoutChange as EventListener,
+      );
+    };
+  }, []);
 
   return useMemo(() => {
     const isOrbMode = viewMode === "orb";
@@ -98,6 +150,8 @@ export const useModelCanvasModes = ({
       viewMode,
       overlayLayoutSettings,
       setOverlayLayoutSettings,
+      overlayPositionEditEnabled,
+      setOverlayPositionEditEnabled,
       isOrbMode,
       isOrb3DMode,
       isOrbLikeMode,
@@ -106,5 +160,11 @@ export const useModelCanvasModes = ({
       showEquirectUi,
       shouldHideSecondaryOrbCanvas,
     };
-  }, [hasSecondaryCanvas, isRestrictedUiAllowed, overlayLayoutSettings, viewMode]);
+  }, [
+    hasSecondaryCanvas,
+    isRestrictedUiAllowed,
+    overlayLayoutSettings,
+    overlayPositionEditEnabled,
+    viewMode,
+  ]);
 };

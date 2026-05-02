@@ -9,7 +9,6 @@ import {
   VideoTexture,
 } from "three";
 import {
-  createPairedAudioController,
   getLocalAssetFallbackPath,
   isAudioUnlockRemembered,
   isVideoMediaUrl,
@@ -19,7 +18,6 @@ import {
 type SharedVideoSession = {
   videoElement: HTMLVideoElement;
   videoTexture: VideoTexture;
-  pairedAudioController: ReturnType<typeof createPairedAudioController>;
   audioUnlocked: boolean;
   transcriptSyncKey?: string;
 };
@@ -54,19 +52,15 @@ const bindGlobalAudioUnlockListeners = () => {
       target.muted = false;
       void target
         .play()
-        .then(async () => {
-          const pairedAudioStarted = await session.pairedAudioController.syncAndPlay();
-          if (pairedAudioStarted) {
-            session.audioUnlocked = true;
-            if (!wasAudioUnlocked) {
-              emitTranscriptSync(session.transcriptSyncKey);
-            }
+        .then(() => {
+          session.audioUnlocked = true;
+          if (!wasAudioUnlocked) {
+            emitTranscriptSync(session.transcriptSyncKey);
           }
         })
         .catch(() => {
           // Keep muted fallback when browser policy still blocks playback.
           target.muted = true;
-          session.pairedAudioController.pause();
           void target.play().catch(() => {
             // Ignore autoplay failure for muted fallback.
           });
@@ -97,9 +91,6 @@ const getOrCreateSharedVideoSession = (sessionKey: string): SharedVideoSession =
   videoElement.volume = 1;
   videoElement.muted = !isAudioUnlockRemembered();
 
-  const pairedAudioController = createPairedAudioController(videoElement);
-  pairedAudioController.bindVideoEvents();
-
   const videoTexture = new VideoTexture(videoElement);
   videoTexture.colorSpace = SRGBColorSpace;
   videoTexture.minFilter = LinearFilter;
@@ -109,7 +100,6 @@ const getOrCreateSharedVideoSession = (sessionKey: string): SharedVideoSession =
   const nextSession: SharedVideoSession = {
     videoElement,
     videoTexture,
-    pairedAudioController,
     audioUnlocked: isAudioUnlockRemembered(),
     transcriptSyncKey: undefined,
   };
@@ -126,7 +116,6 @@ const pauseSharedVideoSession = (sessionKey: string) => {
   }
 
   session.videoElement.pause();
-  session.pairedAudioController.pause();
 };
 
 export const useActiveMediaTexture = (
@@ -141,7 +130,7 @@ export const useActiveMediaTexture = (
     let disposed = false;
     let localTexture: Texture | null = null;
     let cleanupVideoHandlers: (() => void) | null = null;
-    let cleanupAudioHandlers: (() => void) | null = null;
+    let cleanupTranscriptHandlers: (() => void) | null = null;
     const fallbackMediaUrl = useLocalAssetFallback
       ? getLocalAssetFallbackPath(mediaUrl)
       : null;
@@ -149,9 +138,9 @@ export const useActiveMediaTexture = (
     if (isVideoMediaUrl(mediaUrl)) {
       const session = getOrCreateSharedVideoSession(sessionKey);
       const videoElement = session.videoElement;
-      const pairedAudioController = session.pairedAudioController;
       let hasAttemptedFallback = false;
       let hasDispatchedInitialTranscriptSync = false;
+      let previousVideoTime = videoElement.currentTime;
       session.audioUnlocked = session.audioUnlocked || isAudioUnlockRemembered();
       session.transcriptSyncKey = transcriptSyncKey;
 
@@ -162,18 +151,10 @@ export const useActiveMediaTexture = (
 
         if (preferUnmuted) {
           videoElement.muted = false;
-          const wasAudioUnlocked = session.audioUnlocked;
           try {
             await videoElement.play();
-            const pairedAudioStarted = await pairedAudioController?.syncAndPlay();
-            if (pairedAudioStarted) {
-              session.audioUnlocked = true;
-              rememberAudioUnlock();
-              if (!hasDispatchedInitialTranscriptSync || !wasAudioUnlocked) {
-                hasDispatchedInitialTranscriptSync = true;
-                emitTranscriptSync(session.transcriptSyncKey);
-              }
-            }
+            session.audioUnlocked = true;
+            rememberAudioUnlock();
             return true;
           } catch {
             // Continue with muted fallback for Safari/iPad autoplay policy.
@@ -181,7 +162,6 @@ export const useActiveMediaTexture = (
         }
 
         videoElement.muted = true;
-        pairedAudioController?.pause();
         try {
           await videoElement.play();
         } catch {
@@ -192,9 +172,9 @@ export const useActiveMediaTexture = (
       };
 
       const setVideoSource = (nextSource: string) => {
-        pairedAudioController?.setSource(nextSource);
         if (videoElement.src !== nextSource) {
           hasDispatchedInitialTranscriptSync = false;
+          previousVideoTime = 0;
           videoElement.src = nextSource;
           videoElement.load();
         }
@@ -203,36 +183,42 @@ export const useActiveMediaTexture = (
         void attemptPlayback(shouldPreferUnmuted);
       };
 
-      const unbindPairedAudioPlay = pairedAudioController.bindPairedAudioPlay(() => {
-        const wasAudioUnlocked = session.audioUnlocked;
-        session.audioUnlocked = true;
-        if (!hasDispatchedInitialTranscriptSync || !wasAudioUnlocked) {
-          hasDispatchedInitialTranscriptSync = true;
-          emitTranscriptSync(session.transcriptSyncKey);
+      const handleVideoPlaying = () => {
+        if (hasDispatchedInitialTranscriptSync) {
+          return;
         }
-      });
-      const unbindPairedAudioLoop = pairedAudioController.bindPairedAudioLoop(() => {
-        if (session.audioUnlocked && !videoElement.muted) {
-          emitTranscriptSync(session.transcriptSyncKey);
-        }
-      });
-      cleanupAudioHandlers = () => {
-        unbindPairedAudioPlay();
-        unbindPairedAudioLoop();
+
+        hasDispatchedInitialTranscriptSync = true;
+        emitTranscriptSync(session.transcriptSyncKey);
       };
 
-      const retryUnmutedPlaybackIfUnlocked = () => {
+      const handleVideoTimeUpdate = () => {
+        const currentTime = videoElement.currentTime;
+        if (
+          Number.isFinite(currentTime) &&
+          Number.isFinite(previousVideoTime) &&
+          currentTime + 0.25 < previousVideoTime
+        ) {
+          emitTranscriptSync(session.transcriptSyncKey);
+        }
+        previousVideoTime = currentTime;
+      };
+
+      videoElement.addEventListener("playing", handleVideoPlaying);
+      videoElement.addEventListener("timeupdate", handleVideoTimeUpdate);
+      cleanupTranscriptHandlers = () => {
+        videoElement.removeEventListener("playing", handleVideoPlaying);
+        videoElement.removeEventListener("timeupdate", handleVideoTimeUpdate);
+      };
+
+      const retryPlaybackWhenReady = () => {
         if (disposed) {
           return;
         }
 
         const shouldPreferUnmuted =
           session.audioUnlocked || isAudioUnlockRemembered();
-        if (!shouldPreferUnmuted) {
-          return;
-        }
-
-        void attemptPlayback(true);
+        void attemptPlayback(shouldPreferUnmuted);
       };
 
       const handleVideoError = () => {
@@ -250,15 +236,15 @@ export const useActiveMediaTexture = (
       };
 
       videoElement.addEventListener("error", handleVideoError);
-      videoElement.addEventListener("loadedmetadata", retryUnmutedPlaybackIfUnlocked);
-      videoElement.addEventListener("canplay", retryUnmutedPlaybackIfUnlocked);
+      videoElement.addEventListener("loadedmetadata", retryPlaybackWhenReady);
+      videoElement.addEventListener("canplay", retryPlaybackWhenReady);
       cleanupVideoHandlers = () => {
         videoElement.removeEventListener("error", handleVideoError);
         videoElement.removeEventListener(
           "loadedmetadata",
-          retryUnmutedPlaybackIfUnlocked,
+          retryPlaybackWhenReady,
         );
-        videoElement.removeEventListener("canplay", retryUnmutedPlaybackIfUnlocked);
+        videoElement.removeEventListener("canplay", retryPlaybackWhenReady);
       };
 
       setActiveTexture(session.videoTexture);
@@ -310,7 +296,7 @@ export const useActiveMediaTexture = (
       }
 
       cleanupVideoHandlers?.();
-      cleanupAudioHandlers?.();
+      cleanupTranscriptHandlers?.();
     };
   }, [mediaUrl, sessionKey, transcriptSyncKey, useLocalAssetFallback]);
 

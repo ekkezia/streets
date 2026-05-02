@@ -3,6 +3,8 @@
 import React from "react";
 import GlassOrbProjection, {
   GlassOrbSettings,
+  HeadXAxisMapping,
+  HeadYAxisMapping,
   OrbRotationSnapshot,
 } from "./glass-orb-projection";
 import type { TrackedSubject } from "./subject-presence";
@@ -14,6 +16,12 @@ const GlassOrb3DProjection: React.FC<{
   trackedSubjects?: TrackedSubject[];
   headFollowPositionEnabled?: boolean;
   headFollowPositionStrength?: number;
+  headXAxisMapping?: HeadXAxisMapping;
+  headYAxisMapping?: HeadYAxisMapping;
+  isolateHeadXDebug?: boolean;
+  isolateHeadYDebug?: boolean;
+  showRotationAxes?: boolean;
+  pointerControlEnabled?: boolean;
   listenerMode?: boolean;
   allowPointerControlInListenerMode?: boolean;
   remoteRotation?: OrbRotationSnapshot | null;
@@ -22,8 +30,14 @@ const GlassOrb3DProjection: React.FC<{
   texture,
   settings,
   trackedSubjects = [],
-  headFollowPositionEnabled = false,
+  headFollowPositionEnabled = true,
   headFollowPositionStrength = 1,
+  headXAxisMapping = "xRotation",
+  headYAxisMapping = "yaw",
+  isolateHeadXDebug = false,
+  isolateHeadYDebug = false,
+  showRotationAxes = false,
+  pointerControlEnabled = true,
   listenerMode = false,
   allowPointerControlInListenerMode = false,
   remoteRotation = null,
@@ -77,6 +91,12 @@ const GlassOrb3DProjection: React.FC<{
             trackedSubjects={trackedSubjects}
             headFollowPositionEnabled={headFollowPositionEnabled}
             headFollowPositionStrength={headFollowPositionStrength}
+            headXAxisMapping={headXAxisMapping}
+            headYAxisMapping={headYAxisMapping}
+            isolateHeadXDebug={isolateHeadXDebug}
+            isolateHeadYDebug={isolateHeadYDebug}
+            showRotationAxes={showRotationAxes}
+            pointerControlEnabled={pointerControlEnabled}
             listenerMode={listenerMode}
             allowPointerControlInListenerMode={allowPointerControlInListenerMode}
             remoteRotation={
@@ -84,6 +104,7 @@ const GlassOrb3DProjection: React.FC<{
                 ? {
                     yaw: remoteRotation.yaw,
                     xRotation: remoteRotation.xRotation,
+                    zRotation: remoteRotation.zRotation,
                   }
                 : null
             }

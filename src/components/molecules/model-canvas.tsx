@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import { io, Socket } from "socket.io-client";
 import ModelLoader from "../atoms/model-loader";
 import { Move } from "../atoms/model-arrow";
 import ModelEnv from "../atoms/model-env";
@@ -18,6 +19,8 @@ import GlassOrb3DProjection from "../atoms/glass-orb-3d-projection";
 import GlassOrbProjection, {
   DEFAULT_GLASS_ORB_SETTINGS,
   GlassOrbSettings,
+  HeadXAxisMapping,
+  HeadYAxisMapping,
   OrbRotationSnapshot,
 } from "../atoms/glass-orb-projection";
 import {
@@ -46,15 +49,20 @@ const ORB_AUTOPLAY_INTERVAL_MS = 2600;
 const ORB_AUTOPLAY_START_INDEX = 1;
 const ORB_AUTOPLAY_END_INDEX = 30;
 const ORB_AUTOPLAY_VIDEO_FALLBACK_MS = 8000;
-const ORB_SYNC_POLL_INTERVAL_MS = 300;
+const ORB_SYNC_POLL_INTERVAL_MS = 120;
 const ORB_SYNC_CAMERA_SEND_INTERVAL_MS = 120;
+const ORB_SYNC_ROTATION_SEND_INTERVAL_MS = 120;
 const ORB_SYNC_HEARTBEAT_INTERVAL_MS = 2000;
 const ORB_TONE_MAPPING_EXPOSURE = 1.15;
 const SPHERE_TONE_MAPPING_EXPOSURE = 1.05;
 const PROJECTS_WITH_LOCAL_ASSET_FALLBACK = new Set<ProjectId>([
   "new-york-city",
 ]);
-const PROJECT_MEDIA_PRELOAD_CONCURRENCY = 6;
+const PROJECT_MEDIA_PRELOAD_CONCURRENCY_DESKTOP = 6;
+const PROJECT_MEDIA_PRELOAD_CONCURRENCY_TOUCH = 2;
+const PROJECT_MEDIA_PRIORITY_AHEAD_COUNT = 3;
+const PROJECT_MEDIA_PRIORITY_BEHIND_COUNT = 1;
+const PROJECT_MEDIA_BLOCKING_PRIORITY_COUNT = 1;
 const preloadedProjects = new Set<ProjectId>();
 
 const drainResponseBody = async (response: Response) => {
@@ -107,6 +115,46 @@ const preloadSceneMedia = async (
       }
     }
   }
+};
+
+const getPrioritizedPreloadIndices = (activeIndex: number, total: number) => {
+  if (total <= 0) {
+    return {
+      orderedIndices: [] as number[],
+      priorityCount: 0,
+    };
+  }
+
+  const clampedActiveIndex = Math.min(Math.max(activeIndex, 0), total - 1);
+  const priorityIndices: number[] = [];
+  const seen = new Set<number>();
+  const pushIfValid = (index: number) => {
+    if (index < 0 || index >= total || seen.has(index)) {
+      return;
+    }
+    seen.add(index);
+    priorityIndices.push(index);
+  };
+
+  pushIfValid(clampedActiveIndex);
+  for (let step = 1; step <= PROJECT_MEDIA_PRIORITY_AHEAD_COUNT; step += 1) {
+    pushIfValid(clampedActiveIndex + step);
+  }
+  for (let step = 1; step <= PROJECT_MEDIA_PRIORITY_BEHIND_COUNT; step += 1) {
+    pushIfValid(clampedActiveIndex - step);
+  }
+
+  const orderedIndices = [...priorityIndices];
+  for (let index = 0; index < total; index += 1) {
+    if (!seen.has(index)) {
+      orderedIndices.push(index);
+    }
+  }
+
+  return {
+    orderedIndices,
+    priorityCount: priorityIndices.length,
+  };
 };
 
 const parseRotationOffsetToRadians = (value: unknown): number | null => {
@@ -173,28 +221,7 @@ const orbControlRanges: Array<{
   max: number;
   step: number;
 }> = [
-  { id: "radius", label: "Orb Size", min: 1.2, max: 2.6, step: 0.01 },
-  {
-    id: "yaw",
-    label: "Y Rotation",
-    min: -Math.PI * 2,
-    max: Math.PI * 2,
-    step: 0.01,
-  },
-  {
-    id: "xRotation",
-    label: "X Rotation",
-    min: -Math.PI,
-    max: Math.PI,
-    step: 0.01,
-  },
-  {
-    id: "zRotation",
-    label: "Z Rotation",
-    min: -Math.PI * 2,
-    max: Math.PI * 2,
-    step: 0.01,
-  },
+  { id: "radius", label: "Orb Size", min: 1.2, max: 4, step: 0.01 },
   {
     id: "xOffset",
     label: "X Position",
@@ -216,13 +243,32 @@ type CameraOption = {
   label: string;
 };
 
+type RotationOffsets = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+const DEFAULT_ROTATION_OFFSETS: RotationOffsets = {
+  x: -2.12,
+  y: 0,
+  z: 1.8,
+};
+
 const OrbControls: React.FC<{
   settings: GlassOrbSettings;
   onChange: React.Dispatch<React.SetStateAction<GlassOrbSettings>>;
+  rotationOffsets: RotationOffsets;
+  onRotationOffsetsChange: React.Dispatch<React.SetStateAction<RotationOffsets>>;
+  liveRotationPreview: OrbRotationSnapshot | null;
   onHide: () => void;
   overlayLayoutSettings: OverlayLayoutSettings;
   onOverlayLayoutSettingsChange: React.Dispatch<
     React.SetStateAction<OverlayLayoutSettings>
+  >;
+  overlayPositionEditEnabled: boolean;
+  onOverlayPositionEditEnabledChange: React.Dispatch<
+    React.SetStateAction<boolean>
   >;
   cameraEnabled: boolean;
   onCameraEnabledChange: React.Dispatch<React.SetStateAction<boolean>>;
@@ -237,6 +283,18 @@ const OrbControls: React.FC<{
   headFollowPositionStrength: number;
   onHeadFollowPositionStrengthChange: React.Dispatch<
     React.SetStateAction<number>
+  >;
+  headXAxisMapping: HeadXAxisMapping;
+  headYAxisMapping: HeadYAxisMapping;
+  onHeadXAxisMappingChange: React.Dispatch<React.SetStateAction<HeadXAxisMapping>>;
+  onHeadYAxisMappingChange: React.Dispatch<React.SetStateAction<HeadYAxisMapping>>;
+  isolateHeadXDebug: boolean;
+  onIsolateHeadXDebugChange: React.Dispatch<React.SetStateAction<boolean>>;
+  isolateHeadYDebug: boolean;
+  onIsolateHeadYDebugChange: React.Dispatch<React.SetStateAction<boolean>>;
+  rotationAxisDebugEnabled: boolean;
+  onRotationAxisDebugEnabledChange: React.Dispatch<
+    React.SetStateAction<boolean>
   >;
   cameraDeviceId: string;
   onCameraDeviceIdChange: React.Dispatch<React.SetStateAction<string>>;
@@ -259,9 +317,14 @@ const OrbControls: React.FC<{
 }> = ({
   settings,
   onChange,
+  rotationOffsets,
+  onRotationOffsetsChange,
+  liveRotationPreview,
   onHide,
   overlayLayoutSettings,
   onOverlayLayoutSettingsChange,
+  overlayPositionEditEnabled,
+  onOverlayPositionEditEnabledChange,
   cameraEnabled,
   onCameraEnabledChange,
   cameraBackdropEnabled,
@@ -272,6 +335,16 @@ const OrbControls: React.FC<{
   onHeadFollowPositionEnabledChange,
   headFollowPositionStrength,
   onHeadFollowPositionStrengthChange,
+  headXAxisMapping,
+  headYAxisMapping,
+  onHeadXAxisMappingChange,
+  onHeadYAxisMappingChange,
+  isolateHeadXDebug,
+  onIsolateHeadXDebugChange,
+  isolateHeadYDebug,
+  onIsolateHeadYDebugChange,
+  rotationAxisDebugEnabled,
+  onRotationAxisDebugEnabledChange,
   cameraDeviceId,
   onCameraDeviceIdChange,
   cameraOptions,
@@ -291,6 +364,23 @@ const OrbControls: React.FC<{
   autoplayEnabled,
   onAutoplayEnabledChange,
 }) => {
+  const getLiveRotationValue = (
+    id: "yaw" | "xRotation" | "zRotation",
+    baseValue: number,
+  ) => {
+    if (!liveRotationPreview) {
+      return null;
+    }
+
+    if (id === "yaw") {
+      return baseValue + liveRotationPreview.yaw;
+    }
+    if (id === "xRotation") {
+      return baseValue + liveRotationPreview.xRotation;
+    }
+    return baseValue + liveRotationPreview.zRotation;
+  };
+
   return (
     <div className="fixed bottom-4 left-4 top-4 z-[11000] w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-white/15 bg-black/70 text-xs text-white backdrop-blur-md">
       <div
@@ -391,31 +481,109 @@ const OrbControls: React.FC<{
         </div>
         {orbControlRanges.map(({ id, label, min, max, step }) => (
           <label className="block" key={id}>
-            <div className="mb-1 flex items-center justify-between gap-3">
-              <span>{label}</span>
-              <span className="font-mono text-[11px] text-white/70">
-                {settings[id].toFixed(2)}
-              </span>
-            </div>
-            <input
-              className="w-full accent-white"
-              type="range"
-              min={min}
-              max={max}
-              step={step}
-              value={settings[id]}
-              onChange={(event) =>
-                onChange((current) => ({
-                  ...current,
-                  [id]: parseFloat(event.target.value),
-                }))
-              }
-            />
+            {(() => {
+              const isRotationControl =
+                id === "yaw" || id === "xRotation" || id === "zRotation";
+              const baseValue = settings[id];
+              const liveValue = isRotationControl
+                ? getLiveRotationValue(id, baseValue)
+                : null;
+              const clampedLiveValue =
+                liveValue === null
+                  ? null
+                  : Math.min(Math.max(liveValue, min), max);
+
+              return (
+                <>
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <span>{label}</span>
+                    <span className="font-mono text-[11px] text-white/70">
+                      {liveValue === null
+                        ? baseValue.toFixed(2)
+                        : `${baseValue.toFixed(2)} → ${liveValue.toFixed(2)}`}
+                    </span>
+                  </div>
+                  <input
+                    className="w-full accent-white"
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={step}
+                    value={baseValue}
+                    onChange={(event) =>
+                      onChange((current) => ({
+                        ...current,
+                        [id]: parseFloat(event.target.value),
+                      }))
+                    }
+                  />
+                  {clampedLiveValue !== null && (
+                    <input
+                      className="mt-1 w-full accent-cyan-300"
+                      type="range"
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={clampedLiveValue}
+                      disabled
+                      aria-label={`Live ${label}`}
+                    />
+                  )}
+                </>
+              );
+            })()}
           </label>
         ))}
         <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
+            Rotation Offsets
+          </p>
+          {[
+            { id: "y" as const, label: "Y Offset", min: -Math.PI * 2, max: Math.PI * 2 },
+            { id: "x" as const, label: "X Offset", min: -Math.PI, max: Math.PI },
+            { id: "z" as const, label: "Z Offset", min: -Math.PI * 2, max: Math.PI * 2 },
+          ].map(({ id, label, min, max }) => (
+            <label className="block" key={id}>
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <span>{label}</span>
+                <span className="font-mono text-[11px] text-white/70">
+                  {rotationOffsets[id].toFixed(2)}
+                </span>
+              </div>
+              <input
+                className="w-full accent-white"
+                type="range"
+                min={min}
+                max={max}
+                step={0.01}
+                value={rotationOffsets[id]}
+                onChange={(event) =>
+                  onRotationOffsetsChange((current) => ({
+                    ...current,
+                    [id]: parseFloat(event.target.value),
+                  }))
+                }
+              />
+            </label>
+          ))}
+        </div>
+        <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
             Overlay Position
+          </p>
+          <button
+            className="w-full rounded-md border border-white/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-white transition hover:bg-white hover:text-black"
+            onClick={() =>
+              onOverlayPositionEditEnabledChange((current) => !current)
+            }
+            type="button"
+          >
+            {overlayPositionEditEnabled
+              ? "Lock Overlay Position"
+              : "Edit Overlay Position"}
+          </button>
+          <p className="text-[11px] text-white/65">
+            Drag map/transcript on touch devices when edit mode is enabled.
           </p>
           {[
             {
@@ -481,6 +649,19 @@ const OrbControls: React.FC<{
         <div className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
             Tracking Camera
+          </p>
+          <label className="flex items-center gap-2">
+            <input
+              checked={rotationAxisDebugEnabled}
+              onChange={(event) =>
+                onRotationAxisDebugEnabledChange(event.target.checked)
+              }
+              type="checkbox"
+            />
+            Show Rotation Axes
+          </label>
+          <p className="text-[11px] text-white/65">
+            Axis colors: X red = pitch, Y green = yaw, Z blue = roll.
           </p>
           <button
             className="w-full rounded-md border border-white/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-white transition hover:bg-white hover:text-black"
@@ -586,11 +767,58 @@ const OrbControls: React.FC<{
               value={headFollowPositionStrength}
             />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] text-white/75">Head X Axis</span>
+            <select
+              className="w-full rounded-md border border-white/25 bg-black/60 px-2 py-1.5 text-white"
+              onChange={(event) =>
+                onHeadXAxisMappingChange(event.target.value as HeadXAxisMapping)
+              }
+              value={headXAxisMapping}
+            >
+              <option value="xRotation">X Rotation (Pitch)</option>
+              <option value="yaw">Y Rotation (Yaw)</option>
+              <option value="zRotation">Z Rotation (Roll)</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] text-white/75">Head Y Axis</span>
+            <select
+              className="w-full rounded-md border border-white/25 bg-black/60 px-2 py-1.5 text-white"
+              onChange={(event) =>
+                onHeadYAxisMappingChange(event.target.value as HeadYAxisMapping)
+              }
+              value={headYAxisMapping}
+            >
+              <option value="zRotation">Z Rotation (Roll)</option>
+              <option value="xRotation">X Rotation (Pitch)</option>
+              <option value="yaw">Y Rotation (Yaw)</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-white/80">
+            <input
+              checked={isolateHeadXDebug}
+              onChange={(event) => onIsolateHeadXDebugChange(event.target.checked)}
+              type="checkbox"
+            />
+            Isolate Head X (debug)
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-white/80">
+            <input
+              checked={isolateHeadYDebug}
+              onChange={(event) => onIsolateHeadYDebugChange(event.target.checked)}
+              type="checkbox"
+            />
+            Isolate Head Y (debug)
+          </label>
         </div>
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button
             className="rounded-full border border-white/30 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-white transition hover:bg-white hover:text-black"
-            onClick={() => onChange(DEFAULT_GLASS_ORB_SETTINGS)}
+            onClick={() => {
+              onChange(DEFAULT_GLASS_ORB_SETTINGS);
+              onRotationOffsetsChange(DEFAULT_ROTATION_OFFSETS);
+            }}
             type="button"
           >
             Reset
@@ -632,15 +860,23 @@ const ProjectScene: React.FC<{
   doubleBy?: number;
   scale?: [x: number, y: number, z: number];
   rotation?: [x: number, y: number, z: number];
+  rotationOffsets: RotationOffsets;
   orbMode?: boolean;
   orb3DMode?: boolean;
   orbSettings: GlassOrbSettings;
   trackedSubjects: TrackedSubject[];
+  cameraActive: boolean;
   headFollowPositionEnabled: boolean;
   headFollowPositionStrength: number;
+  headXAxisMapping: HeadXAxisMapping;
+  headYAxisMapping: HeadYAxisMapping;
+  isolateHeadXDebug: boolean;
+  isolateHeadYDebug: boolean;
+  rotationAxisDebugEnabled: boolean;
   listenerMode: boolean;
   remotePointerControlEnabled: boolean;
   remoteOrbRotation: OrbRotationSnapshot | null;
+  onOrbRotationChange?: (rotation: OrbRotationSnapshot) => void;
   useLocalAssetFallback?: boolean;
   mediaSessionKey: string;
   transcriptSyncKey: string;
@@ -653,15 +889,23 @@ const ProjectScene: React.FC<{
   doubleBy,
   scale,
   rotation,
+  rotationOffsets,
   orbMode,
   orb3DMode,
   orbSettings,
   trackedSubjects,
+  cameraActive,
   headFollowPositionEnabled,
   headFollowPositionStrength,
+  headXAxisMapping,
+  headYAxisMapping,
+  isolateHeadXDebug,
+  isolateHeadYDebug,
+  rotationAxisDebugEnabled,
   listenerMode,
   remotePointerControlEnabled,
   remoteOrbRotation,
+  onOrbRotationChange,
   useLocalAssetFallback = false,
   mediaSessionKey,
   transcriptSyncKey,
@@ -679,9 +923,9 @@ const ProjectScene: React.FC<{
   const rotationOffset = rotation ?? [0, 0, 0];
   const effectiveOrbSettings = {
     ...orbSettings,
-    yaw: orbSettings.yaw + rotationOffset[1],
-    xRotation: orbSettings.xRotation + rotationOffset[0],
-    zRotation: orbSettings.zRotation + rotationOffset[2],
+    yaw: orbSettings.yaw + rotationOffset[1] + rotationOffsets.y,
+    xRotation: orbSettings.xRotation + rotationOffset[0] + rotationOffsets.x,
+    zRotation: orbSettings.zRotation + rotationOffset[2] + rotationOffsets.z,
   };
 
   if (!activeTexture) {
@@ -702,10 +946,16 @@ const ProjectScene: React.FC<{
           trackedSubjects={trackedSubjects}
           headFollowPositionEnabled={headFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
+          headXAxisMapping={headXAxisMapping}
+          headYAxisMapping={headYAxisMapping}
+          isolateHeadXDebug={isolateHeadXDebug}
+          isolateHeadYDebug={isolateHeadYDebug}
+          showRotationAxes={rotationAxisDebugEnabled}
+          pointerControlEnabled={false}
           listenerMode={listenerMode}
-          allowPointerControlInListenerMode={remotePointerControlEnabled}
+          allowPointerControlInListenerMode={false}
           remoteRotation={remoteOrbRotation}
-          onRotationChange={() => {}}
+          onRotationChange={onOrbRotationChange}
         />
       ) : orbMode ? (
         <GlassOrbProjection
@@ -714,10 +964,16 @@ const ProjectScene: React.FC<{
           trackedSubjects={trackedSubjects}
           headFollowPositionEnabled={headFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
+          headXAxisMapping={headXAxisMapping}
+          headYAxisMapping={headYAxisMapping}
+          isolateHeadXDebug={isolateHeadXDebug}
+          isolateHeadYDebug={isolateHeadYDebug}
+          showRotationAxes={rotationAxisDebugEnabled}
+          pointerControlEnabled={false}
           listenerMode={listenerMode}
-          allowPointerControlInListenerMode={remotePointerControlEnabled}
+          allowPointerControlInListenerMode={false}
           remoteRotation={remoteOrbRotation}
-          onRotationChange={() => {}}
+          onRotationChange={onOrbRotationChange}
         />
       ) : (
         <>
@@ -768,7 +1024,7 @@ const ProjectScene: React.FC<{
           )}
         </>
       )}
-      {!isOrbVisualMode && <OrbitControls maxDistance={5} />}
+      {!isOrbVisualMode && <OrbitControls enabled={false} maxDistance={5} />}
     </>
   );
 };
@@ -801,30 +1057,46 @@ const ModelCanvas: React.FC<{
   const [orbSettings, setOrbSettings] = useState<GlassOrbSettings>(
     DEFAULT_GLASS_ORB_SETTINGS,
   );
+  const [rotationOffsets, setRotationOffsets] = useState<RotationOffsets>(
+    DEFAULT_ROTATION_OFFSETS,
+  );
   const [showOrbControls, setShowOrbControls] = useState(false);
   const [trackedSubjects, setTrackedSubjects] = useState<TrackedSubject[]>([]);
   const [trackingCameraEnabled, setTrackingCameraEnabled] = useState(false);
   const [trackingCameraDeviceId, setTrackingCameraDeviceId] = useState("");
-  const [trackingFlipX, setTrackingFlipX] = useState(false);
+  const [trackingFlipX, setTrackingFlipX] = useState(true);
   const [trackingFlipY, setTrackingFlipY] = useState(false);
   const [trackingBackdropEnabled, setTrackingBackdropEnabled] = useState(true);
   const [trackingBackdropOpacity, setTrackingBackdropOpacity] = useState(0.66);
   const [headFollowPositionEnabled, setHeadFollowPositionEnabled] =
-    useState(false);
+    useState(true);
   const [headFollowPositionStrength, setHeadFollowPositionStrength] =
     useState(1);
+  const [headXAxisMapping, setHeadXAxisMapping] =
+    useState<HeadXAxisMapping>("xRotation");
+  const [headYAxisMapping, setHeadYAxisMapping] =
+    useState<HeadYAxisMapping>("yaw");
+  const [isolateHeadXDebug, setIsolateHeadXDebug] = useState(true);
+  const [isolateHeadYDebug, setIsolateHeadYDebug] = useState(true);
+  const [rotationAxisDebugEnabled, setRotationAxisDebugEnabled] =
+    useState(false);
   const [hideOrbHud, setHideOrbHud] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [cameraOptions, setCameraOptions] = useState<CameraOption[]>([]);
   const [orbAutoplayEnabled, setOrbAutoplayEnabledState] = useState(true);
   const orbClientIdRef = useRef(
     `orb-${Math.random().toString(36).slice(2, 10)}`,
   );
   const [listenerMode, setListenerMode] = useState(false);
+  const hasUserManuallySelectedRoleRef = useRef(false);
+  const hasAppliedTouchOrbDefaultsRef = useRef(false);
   const [isBroadcaster, setIsBroadcaster] = useState(false);
   const [activeBroadcasterId, setActiveBroadcasterId] = useState<string | null>(
     null,
   );
   const [remoteOrbRotation, setRemoteOrbRotation] =
+    useState<OrbRotationSnapshot | null>(null);
+  const [liveOrbRotationPreview, setLiveOrbRotationPreview] =
     useState<OrbRotationSnapshot | null>(null);
   const [activeVideoDurationMs, setActiveVideoDurationMs] = useState<
     number | null
@@ -835,6 +1107,14 @@ const ModelCanvas: React.FC<{
   const [orbRoleWarning, setOrbRoleWarning] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const activeTrackedSubjectRef = useRef<TrackedSubject | null>(null);
+  const orbSocketRef = useRef<Socket | null>(null);
+  const orbSocketConnectedRef = useRef(false);
+  const listenerModeRef = useRef(listenerMode);
+  const activeBroadcasterIdRef = useRef<string | null>(null);
+  const lastOrbRotationSentAtRef = useRef(0);
+  const lastOrbRotationPayloadRef = useRef<OrbRotationSnapshot | null>(null);
+  const lastLiveRotationUiUpdateAtRef = useRef(0);
+  const liveOrbRotationPreviewRef = useRef<OrbRotationSnapshot | null>(null);
   const useLocalAssetFallback = PROJECTS_WITH_LOCAL_ASSET_FALLBACK.has(
     projectId,
   );
@@ -844,6 +1124,8 @@ const ModelCanvas: React.FC<{
   const {
     overlayLayoutSettings,
     setOverlayLayoutSettings,
+    overlayPositionEditEnabled,
+    setOverlayPositionEditEnabled,
     isOrbMode,
     isOrb3DMode,
     isOrbLikeMode,
@@ -862,6 +1144,16 @@ const ModelCanvas: React.FC<{
   }, [currentIndexToPathname]);
 
   useEffect(() => {
+    setRotationOffsets((current) => {
+      const isLegacyDefault =
+        Math.abs(current.x - 1.28) < 0.001 &&
+        Math.abs(current.y - 1.6) < 0.001 &&
+        Math.abs(current.z) < 0.001;
+      return isLegacyDefault ? DEFAULT_ROTATION_OFFSETS : current;
+    });
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -869,6 +1161,27 @@ const ModelCanvas: React.FC<{
     const params = new URLSearchParams(window.location.search);
     setOrbAutoplayEnabledState(params.get("autoplay") !== "off");
   }, [pathname]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncTouchDevice = () => {
+      const hasTouch =
+        (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
+        "ontouchstart" in window ||
+        window.matchMedia?.("(pointer: coarse)").matches;
+      setIsTouchDevice(hasTouch);
+    };
+
+    syncTouchDevice();
+    window.addEventListener("resize", syncTouchDevice);
+
+    return () => {
+      window.removeEventListener("resize", syncTouchDevice);
+    };
+  }, []);
 
   const handleToggleFullscreen = useCallback(async () => {
     if (typeof document === "undefined") {
@@ -991,6 +1304,10 @@ const ModelCanvas: React.FC<{
   const textureIndex = (doubleBy ? doubleBy + currentModel : currentModel) - 1;
   const activeMediaUrl =
     mediaUrls[Math.min(Math.max(textureIndex, 0), mediaUrls.length - 1)];
+  const prioritizedPreload = useMemo(
+    () => getPrioritizedPreloadIndices(textureIndex, mediaUrls.length),
+    [mediaUrls.length, textureIndex],
+  );
 
   useEffect(() => {
     if (shouldHideSecondaryOrbCanvas) {
@@ -1005,33 +1322,55 @@ const ModelCanvas: React.FC<{
 
     let disposed = false;
     const controller = new AbortController();
+    const blockingPriorityCount = Math.min(
+      PROJECT_MEDIA_BLOCKING_PRIORITY_COUNT,
+      prioritizedPreload.priorityCount,
+    );
+    const priorityIndexSet = new Set(
+      prioritizedPreload.orderedIndices.slice(0, blockingPriorityCount),
+    );
+    let loadedPriorityCount = 0;
 
     setProjectMediaPreloadReady(false);
     setProjectMediaPreloadLoaded(0);
 
+    if (blockingPriorityCount === 0) {
+      setProjectMediaPreloadReady(true);
+    }
+
     let nextIndex = 0;
     const worker = async () => {
       while (!disposed && !controller.signal.aborted) {
-        const index = nextIndex;
+        const preloadOrderIndex = nextIndex;
         nextIndex += 1;
-        if (index >= mediaUrls.length) {
+        if (preloadOrderIndex >= prioritizedPreload.orderedIndices.length) {
           break;
         }
 
+        const mediaIndex = prioritizedPreload.orderedIndices[preloadOrderIndex];
         await preloadSceneMedia(
-          mediaUrls[index],
+          mediaUrls[mediaIndex],
           useLocalAssetFallback,
           controller.signal,
         );
 
         if (!disposed) {
+          if (priorityIndexSet.has(mediaIndex)) {
+            loadedPriorityCount += 1;
+            if (loadedPriorityCount >= blockingPriorityCount) {
+              setProjectMediaPreloadReady(true);
+            }
+          }
           setProjectMediaPreloadLoaded((count) => count + 1);
         }
       }
     };
 
+    const preloadConcurrency = isTouchDevice
+      ? PROJECT_MEDIA_PRELOAD_CONCURRENCY_TOUCH
+      : PROJECT_MEDIA_PRELOAD_CONCURRENCY_DESKTOP;
     const workers = Array.from(
-      { length: Math.min(PROJECT_MEDIA_PRELOAD_CONCURRENCY, mediaUrls.length) },
+      { length: Math.min(preloadConcurrency, mediaUrls.length) },
       () => worker(),
     );
 
@@ -1048,8 +1387,10 @@ const ModelCanvas: React.FC<{
     };
   }, [
     mediaUrls,
+    prioritizedPreload,
     projectId,
     shouldHideSecondaryOrbCanvas,
+    isTouchDevice,
     useLocalAssetFallback,
   ]);
 
@@ -1345,6 +1686,7 @@ const ModelCanvas: React.FC<{
   }, [activeTrackedSubject]);
 
   const handleListenerModeChange = useCallback((enabled: boolean) => {
+    hasUserManuallySelectedRoleRef.current = true;
     setListenerMode(enabled);
     setOrbRoleWarning(null);
     setOrbSyncError(null);
@@ -1352,6 +1694,225 @@ const ModelCanvas: React.FC<{
       setIsBroadcaster(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!showOrbUi || !isOrbLikeMode || hasUserManuallySelectedRoleRef.current) {
+      return;
+    }
+
+    setListenerMode(isTouchDevice);
+  }, [isOrbLikeMode, isTouchDevice, showOrbUi]);
+
+  useEffect(() => {
+    if (!isTouchDevice || hasAppliedTouchOrbDefaultsRef.current) {
+      return;
+    }
+
+    hasAppliedTouchOrbDefaultsRef.current = true;
+    setOrbSettings((current) => ({
+      ...current,
+      radius: 3,
+      xRotation: 0.6,
+      yaw: 6.2,
+    }));
+  }, [isTouchDevice]);
+
+  useEffect(() => {
+    listenerModeRef.current = listenerMode;
+  }, [listenerMode]);
+
+  useEffect(() => {
+    activeBroadcasterIdRef.current = activeBroadcasterId;
+  }, [activeBroadcasterId]);
+
+  const handleOrbRotationChange = useCallback(
+    (rotation: OrbRotationSnapshot) => {
+      const now = Date.now();
+      const previousLiveRotation = liveOrbRotationPreviewRef.current;
+      if (
+        !previousLiveRotation ||
+        Math.abs(previousLiveRotation.yaw - rotation.yaw) > 0.01 ||
+        Math.abs(previousLiveRotation.xRotation - rotation.xRotation) > 0.01 ||
+        Math.abs(previousLiveRotation.zRotation - rotation.zRotation) > 0.01 ||
+        now - lastLiveRotationUiUpdateAtRef.current > 80
+      ) {
+        liveOrbRotationPreviewRef.current = rotation;
+        lastLiveRotationUiUpdateAtRef.current = now;
+        setLiveOrbRotationPreview(rotation);
+      }
+
+      if (
+        typeof window === "undefined" ||
+        !showOrbUi ||
+        !isOrbLikeMode ||
+        listenerMode ||
+        !isBroadcaster
+      ) {
+        return;
+      }
+
+      if (now - lastOrbRotationSentAtRef.current < ORB_SYNC_ROTATION_SEND_INTERVAL_MS) {
+        return;
+      }
+
+      const previousRotation = lastOrbRotationPayloadRef.current;
+      if (
+        previousRotation &&
+        Math.abs(previousRotation.yaw - rotation.yaw) < 0.001 &&
+        Math.abs(previousRotation.xRotation - rotation.xRotation) < 0.001 &&
+        Math.abs(previousRotation.zRotation - rotation.zRotation) < 0.001
+      ) {
+        return;
+      }
+
+      lastOrbRotationSentAtRef.current = now;
+      lastOrbRotationPayloadRef.current = rotation;
+
+      if (orbSocketConnectedRef.current && orbSocketRef.current) {
+        orbSocketRef.current.emit("orb:rotation", {
+          clientId: orbClientIdRef.current,
+          yaw: rotation.yaw,
+          xRotation: rotation.xRotation,
+          zRotation: rotation.zRotation,
+        });
+        setOrbSyncError(null);
+        return;
+      }
+
+      void fetch("/api/orb-sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+        body: JSON.stringify({
+          action: "rotation",
+          clientId: orbClientIdRef.current,
+          yaw: rotation.yaw,
+          xRotation: rotation.xRotation,
+          zRotation: rotation.zRotation,
+        }),
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("Failed rotation sync action.");
+          }
+          setOrbSyncError(null);
+        })
+        .catch(() => {
+          setOrbSyncError("Sync server unavailable.");
+        });
+    },
+    [isBroadcaster, isOrbLikeMode, listenerMode, showOrbUi],
+  );
+
+  useEffect(() => {
+    if (showOrbUi && isOrbLikeMode) {
+      return;
+    }
+
+    liveOrbRotationPreviewRef.current = null;
+    setLiveOrbRotationPreview(null);
+  }, [isOrbLikeMode, showOrbUi]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !showOrbUi || !isOrbLikeMode) {
+      orbSocketConnectedRef.current = false;
+      orbSocketRef.current?.disconnect();
+      orbSocketRef.current = null;
+      return;
+    }
+
+    let disposed = false;
+    let socket: Socket | null = null;
+
+    const connectSocket = async () => {
+      try {
+        await fetch("/api/orb-ws", { cache: "no-store" });
+      } catch {
+        // Ignore bootstrap failures and still attempt socket connection.
+      }
+
+      if (disposed) {
+        return;
+      }
+
+      socket = io({
+        path: "/api/orb-ws/socket.io",
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionDelay: 250,
+        reconnectionDelayMax: 1500,
+      });
+      orbSocketRef.current = socket;
+
+      socket.on("connect", () => {
+        orbSocketConnectedRef.current = true;
+        setOrbSyncError(null);
+      });
+
+      socket.on("disconnect", () => {
+        orbSocketConnectedRef.current = false;
+      });
+
+      socket.on("connect_error", () => {
+        orbSocketConnectedRef.current = false;
+      });
+
+      socket.on("orb:rotation", (payload: unknown) => {
+        if (!listenerModeRef.current) {
+          return;
+        }
+
+        if (!payload || typeof payload !== "object") {
+          return;
+        }
+
+        const parsed = payload as {
+          clientId?: unknown;
+          yaw?: unknown;
+          xRotation?: unknown;
+          zRotation?: unknown;
+        };
+        const clientId =
+          typeof parsed.clientId === "string" ? parsed.clientId : null;
+        const yaw = typeof parsed.yaw === "number" ? parsed.yaw : null;
+        const xRotation =
+          typeof parsed.xRotation === "number" ? parsed.xRotation : null;
+        const zRotation =
+          typeof parsed.zRotation === "number" ? parsed.zRotation : 0;
+
+        if (
+          !clientId ||
+          !Number.isFinite(yaw) ||
+          !Number.isFinite(xRotation)
+        ) {
+          return;
+        }
+
+        const activeBroadcaster = activeBroadcasterIdRef.current;
+        if (activeBroadcaster && activeBroadcaster !== clientId) {
+          return;
+        }
+
+        setRemoteOrbRotation({
+          yaw,
+          xRotation,
+          zRotation,
+        });
+      });
+    };
+
+    void connectSocket();
+
+    return () => {
+      disposed = true;
+      orbSocketConnectedRef.current = false;
+      orbSocketRef.current?.disconnect();
+      orbSocketRef.current = null;
+      socket = null;
+    };
+  }, [isOrbLikeMode, showOrbUi]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !showOrbUi || !isOrbLikeMode) {
@@ -1371,7 +1932,7 @@ const ModelCanvas: React.FC<{
 
         const payload = (await response.json()) as {
           broadcasterId?: string | null;
-          rotation?: { yaw?: number; xRotation?: number } | null;
+          rotation?: { yaw?: number; xRotation?: number; zRotation?: number } | null;
         };
 
         if (disposed) {
@@ -1386,17 +1947,38 @@ const ModelCanvas: React.FC<{
         const shouldUseRemoteRotation = listenerMode || isSelfBroadcaster;
 
         setActiveBroadcasterId(broadcasterId);
-        setIsBroadcaster(isSelfBroadcaster);
+        setIsBroadcaster((current) => {
+          if (isSelfBroadcaster) {
+            return true;
+          }
+          if (broadcasterId && broadcasterId !== orbClientIdRef.current) {
+            return false;
+          }
+          return listenerMode ? false : current;
+        });
 
         if (shouldUseRemoteRotation) {
+          if (listenerMode && orbSocketConnectedRef.current) {
+            setOrbSyncError(null);
+            return;
+          }
+
           const yaw = payload.rotation?.yaw;
           const xRotation = payload.rotation?.xRotation;
-          if (Number.isFinite(yaw) && Number.isFinite(xRotation)) {
+          const zRotation =
+            typeof payload.rotation?.zRotation === "number"
+              ? payload.rotation.zRotation
+              : 0;
+          if (
+            Number.isFinite(yaw) &&
+            Number.isFinite(xRotation)
+          ) {
             setRemoteOrbRotation({
               yaw: yaw as number,
               xRotation: xRotation as number,
+              zRotation,
             });
-          } else {
+          } else if (!listenerMode) {
             setRemoteOrbRotation(null);
           }
         } else {
@@ -1503,10 +2085,37 @@ const ModelCanvas: React.FC<{
 
     const heartbeatId = window.setInterval(() => {
       void postOrbSyncAction("heartbeat")
-        .then(() => {
-          if (!disposed) {
-            setOrbSyncError(null);
+        .then((payload) => {
+          if (disposed) {
+            return;
           }
+
+          const heartbeatPayload = payload as {
+            ok?: boolean;
+            broadcasterId?: string | null;
+          };
+          const broadcasterId =
+            typeof heartbeatPayload.broadcasterId === "string"
+              ? heartbeatPayload.broadcasterId
+              : null;
+          setActiveBroadcasterId(broadcasterId);
+
+          if (heartbeatPayload.ok) {
+            setIsBroadcaster(true);
+            setOrbRoleWarning(null);
+          } else {
+            setIsBroadcaster(false);
+            if (broadcasterId && broadcasterId !== clientId) {
+              setOrbRoleWarning(
+                "Another broadcaster is active. Switch to listener or try again later.",
+              );
+            } else {
+              setOrbRoleWarning("Broadcaster claim lost. Reclaiming...");
+              void claimBroadcaster();
+            }
+          }
+
+          setOrbSyncError(null);
         })
         .catch(() => {
           if (!disposed) {
@@ -1755,6 +2364,12 @@ const ModelCanvas: React.FC<{
             : column
               ? style[column]
               : { filter: filterStyle }),
+          ...(isTouchDevice
+            ? {
+                transform: "rotate(180deg)",
+                transformOrigin: "center center",
+              }
+            : {}),
         }}
         gl={{
           toneMappingExposure: isOrbLikeMode
@@ -1783,19 +2398,25 @@ const ModelCanvas: React.FC<{
             doubleBy={doubleBy}
             scale={scale}
             rotation={rotation}
+            rotationOffsets={rotationOffsets}
             orbMode={isOrbMode}
             orb3DMode={isOrb3DMode}
             orbSettings={orbSettings}
             trackedSubjects={trackedSubjects}
+            cameraActive={trackingCameraEnabled}
             headFollowPositionEnabled={
               headFollowPositionEnabled && trackingCameraEnabled
             }
             headFollowPositionStrength={headFollowPositionStrength}
-            listenerMode={listenerMode || isBroadcaster}
+            headXAxisMapping={headXAxisMapping}
+            headYAxisMapping={headYAxisMapping}
+            isolateHeadXDebug={isolateHeadXDebug}
+            isolateHeadYDebug={isolateHeadYDebug}
+            rotationAxisDebugEnabled={rotationAxisDebugEnabled}
+            listenerMode={listenerMode}
             remotePointerControlEnabled={remotePointerControlEnabled}
-            remoteOrbRotation={
-              listenerMode || isBroadcaster ? remoteOrbRotation : null
-            }
+            remoteOrbRotation={listenerMode ? remoteOrbRotation : null}
+            onOrbRotationChange={handleOrbRotationChange}
             useLocalAssetFallback={useLocalAssetFallback}
             mediaSessionKey={mediaSessionKey}
             transcriptSyncKey={transcriptSyncKey}
@@ -1816,7 +2437,7 @@ const ModelCanvas: React.FC<{
       {showOrbUi && withSubtitle && (
         <OrbSubtitle projectId={projectId} currentModel={currentModel} />
       )}
-      {showOrbUi && !showOrbControls && !hideOrbHud && (
+      {showOrbUi && !showOrbControls && (!hideOrbHud || isTouchDevice) && (
         <button
           aria-label="Show orb controller"
           className="fixed bottom-4 left-4 z-[11000] rounded-r-xl border border-white/20 bg-black/70 px-3 py-3 text-sm font-semibold text-white backdrop-blur-md transition hover:bg-white hover:text-black"
@@ -1826,13 +2447,18 @@ const ModelCanvas: React.FC<{
           ▶
         </button>
       )}
-      {showOrbUi && showOrbControls && !hideOrbHud && (
+      {showOrbUi && showOrbControls && (!hideOrbHud || isTouchDevice) && (
         <OrbControls
           settings={orbSettings}
           onChange={setOrbSettings}
+          rotationOffsets={rotationOffsets}
+          onRotationOffsetsChange={setRotationOffsets}
+          liveRotationPreview={liveOrbRotationPreview}
           onHide={() => setShowOrbControls(false)}
           overlayLayoutSettings={overlayLayoutSettings}
           onOverlayLayoutSettingsChange={setOverlayLayoutSettings}
+          overlayPositionEditEnabled={overlayPositionEditEnabled}
+          onOverlayPositionEditEnabledChange={setOverlayPositionEditEnabled}
           cameraEnabled={trackingCameraEnabled}
           onCameraEnabledChange={setTrackingCameraEnabled}
           cameraBackdropEnabled={trackingBackdropEnabled}
@@ -1843,6 +2469,16 @@ const ModelCanvas: React.FC<{
           onHeadFollowPositionEnabledChange={setHeadFollowPositionEnabled}
           headFollowPositionStrength={headFollowPositionStrength}
           onHeadFollowPositionStrengthChange={setHeadFollowPositionStrength}
+          headXAxisMapping={headXAxisMapping}
+          headYAxisMapping={headYAxisMapping}
+          onHeadXAxisMappingChange={setHeadXAxisMapping}
+          onHeadYAxisMappingChange={setHeadYAxisMapping}
+          isolateHeadXDebug={isolateHeadXDebug}
+          onIsolateHeadXDebugChange={setIsolateHeadXDebug}
+          isolateHeadYDebug={isolateHeadYDebug}
+          onIsolateHeadYDebugChange={setIsolateHeadYDebug}
+          rotationAxisDebugEnabled={rotationAxisDebugEnabled}
+          onRotationAxisDebugEnabledChange={setRotationAxisDebugEnabled}
           cameraDeviceId={trackingCameraDeviceId}
           onCameraDeviceIdChange={setTrackingCameraDeviceId}
           cameraOptions={cameraOptions}

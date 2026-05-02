@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDirection } from "../atoms/model-arrow";
 import { DirectionTuple } from "@/config/config";
 import {
-  createPairedAudioController,
   getLocalAssetFallbackPath,
   isAudioUnlockRemembered,
   rememberAudioUnlock,
@@ -71,16 +70,12 @@ const EquirectangularView: React.FC<EquirectangularViewProps> = ({
       return;
     }
 
-    const pairedAudioController = createPairedAudioController(target);
-    const unbindPairedAudioVideoEvents = pairedAudioController.bindVideoEvents();
-
     const attemptPlayback = async (preferUnmuted: boolean) => {
       if (preferUnmuted) {
         target.muted = false;
         setVideoMuted(false);
         try {
           await target.play();
-          await pairedAudioController.syncAndPlay();
           setVideoMuted(false);
           rememberAudioUnlock();
           return true;
@@ -91,7 +86,6 @@ const EquirectangularView: React.FC<EquirectangularViewProps> = ({
 
       target.muted = true;
       setVideoMuted(true);
-      pairedAudioController.pause();
       try {
         await target.play();
       } catch {
@@ -119,7 +113,6 @@ const EquirectangularView: React.FC<EquirectangularViewProps> = ({
     };
 
     syncInlinePlaybackAttributes();
-    pairedAudioController.setSource(resolvedMediaUrl);
     tryStartPlayback();
     target.addEventListener("loadedmetadata", tryStartPlayback);
     target.addEventListener("canplay", tryStartPlayback);
@@ -131,11 +124,9 @@ const EquirectangularView: React.FC<EquirectangularViewProps> = ({
     return () => {
       target.removeEventListener("loadedmetadata", tryStartPlayback);
       target.removeEventListener("canplay", tryStartPlayback);
-      unbindPairedAudioVideoEvents();
       window.removeEventListener("pointerdown", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
       window.removeEventListener("touchstart", unlockAudio);
-      pairedAudioController.dispose();
     };
   }, [isVideo, resolvedMediaUrl]);
 
