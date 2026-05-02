@@ -397,12 +397,10 @@ const LocationMap: React.FC<{
 
   const mapWidth = isOrbLikeView ? width : "clamp(24vw, 25vw, 150px)";
   const mapHeight = isOrbLikeView ? height : "clamp(16vw, 20vw, 120px)";
-  const mapBottom = "var(--overlay-map-vertical, 8px)";
-  const mapRight = isOrbLikeView
-    ? "var(--overlay-map-right, 8px)"
-    : "var(--overlay-map-vertical, 8px)";
-  const mapTransform = isTouchDevice ? "rotate(-90deg)" : undefined;
-  const mapTransformOrigin = isTouchDevice ? "bottom right" : undefined;
+  const mapBottom = isOrbLikeView ? "var(--overlay-map-vertical, 8px)" : "8px";
+  const mapRight = isOrbLikeView ? "var(--overlay-map-right, 8px)" : "8px";
+  const mapTransform = isTouchOrbView ? "rotate(-90deg)" : undefined;
+  const mapTransformOrigin = isTouchOrbView ? "bottom right" : undefined;
   const mapRightPx = parseCssVarPx("--overlay-map-right", 8);
   const mapVerticalPx = parseCssVarPx("--overlay-map-vertical", 8);
   const defaultCoordinateBadgeRightPx = isTouchDevice

@@ -2364,7 +2364,7 @@ const ModelCanvas: React.FC<{
             : column
               ? style[column]
               : { filter: filterStyle }),
-          ...(isTouchDevice
+          ...(isTouchDevice && isOrbLikeMode
             ? {
                 transform: "rotate(180deg)",
                 transformOrigin: "center center",
