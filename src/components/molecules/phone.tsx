@@ -18,6 +18,9 @@ const getCurrentTime = () => {
 
 const Phone = () => {
   const pathname = usePathname();
+  const pathnameSegment = pathname?.split("/")[2];
+  const currentPath = Number.parseInt(pathnameSegment ?? "1", 10);
+  const safeCurrentPath = Number.isFinite(currentPath) ? currentPath : 1;
 
   const { display, setDisplay } = useCarousellContext();
 
@@ -127,8 +130,8 @@ const handleBack = () => {
           >
             {CHAT.filter(
               (item) => {
-                  if (pathname.split("/")[2]) {
-                    return item.path <= parseInt(pathname.split("/")[2])
+                  if (pathnameSegment) {
+                    return item.path <= safeCurrentPath
                   } else {
                     return item.path === 1
                   }
@@ -136,16 +139,16 @@ const handleBack = () => {
               },
             ).map((item, idx) => {
               const isMatch = () => {
-                if (pathname.split("/")[2]) {
-                  return item.path === parseInt(pathname.split("/")[2]);
+                if (pathnameSegment) {
+                  return item.path === safeCurrentPath;
                 } else {
                   return item.path === 1
                 }
               }
               
-              const numberOfChatBeforeCurrent = CHAT.filter((item) => item.path < parseInt(pathname.split("/")[2])).length - 1;
+              const numberOfChatBeforeCurrent = CHAT.filter((item) => item.path < safeCurrentPath).length - 1;
 
-              const transitionDelay = parseInt(pathname.split("/")[2]) === 1 || pathname.split("/")[2] === undefined ? idx * 0.5 : (idx - numberOfChatBeforeCurrent) * 0.5;
+              const transitionDelay = safeCurrentPath === 1 || pathnameSegment === undefined ? idx * 0.5 : (idx - numberOfChatBeforeCurrent) * 0.5;
 
               return (
                 <motion.div

@@ -20,7 +20,11 @@ type MediaTranscriptProps = {
   height?: number;
 };
 
-const parseImageKeyFromPathname = (pathname: string): number => {
+const parseImageKeyFromPathname = (pathname: string | null): number => {
+  if (!pathname) {
+    return 1;
+  }
+
   const segments = pathname.split("/").filter(Boolean);
   const lastSegment = segments[segments.length - 1] ?? "1";
   const parsed = Number.parseInt(lastSegment, 10);

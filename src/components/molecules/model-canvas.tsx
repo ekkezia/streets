@@ -55,6 +55,15 @@ const ORB_SYNC_ROTATION_SEND_INTERVAL_MS = 120;
 const ORB_SYNC_HEARTBEAT_INTERVAL_MS = 2000;
 const ORB_TONE_MAPPING_EXPOSURE = 1.15;
 const SPHERE_TONE_MAPPING_EXPOSURE = 1.05;
+const ORB_SYNC_SERVER_URL = (
+  process.env.NEXT_PUBLIC_ORB_SYNC_SERVER_URL ?? ""
+).trim().replace(/\/+$/, "");
+const ORB_WS_SERVER_URL = (
+  process.env.NEXT_PUBLIC_ORB_WS_SERVER_URL ?? ""
+).trim().replace(/\/+$/, "");
+const ORB_SYNC_WS_BASE_URL = ORB_WS_SERVER_URL || ORB_SYNC_SERVER_URL;
+const getOrbSyncEndpoint = (path: string) =>
+  ORB_SYNC_SERVER_URL ? `${ORB_SYNC_SERVER_URL}${path}` : path;
 const PROJECTS_WITH_LOCAL_ASSET_FALLBACK = new Set<ProjectId>([
   "new-york-city",
 ]);
@@ -1024,7 +1033,15 @@ const ProjectScene: React.FC<{
           )}
         </>
       )}
-      {!isOrbVisualMode && <OrbitControls enabled={false} maxDistance={5} />}
+      {!isOrbVisualMode && (
+        <OrbitControls
+          enabled
+          enableRotate
+          enablePan={false}
+          enableZoom={false}
+          maxDistance={5}
+        />
+      )}
     </>
   );
 };
@@ -1043,10 +1060,12 @@ const ModelCanvas: React.FC<{
   const pathname = usePathname();
   const router = useRouter();
   const isRestrictedUiAllowed = useRestrictedUiAccess();
+  const pathnameValue = pathname ?? "/";
+  const pathnameSegments = pathnameValue.split("/");
   const currentIndexToPathname =
-    pathname.split("/").length <= 2
+    pathnameSegments.length <= 2
       ? "1"
-      : pathname.split("/")[pathname.split("/").length - 1];
+      : pathnameSegments[pathnameSegments.length - 1];
 
   // State management to control the current model, this state is controlled by <Move /> as well
   const [currentModel, setCurrentModel] = useState<number>(
@@ -1133,7 +1152,7 @@ const ModelCanvas: React.FC<{
     showEquirectUi,
     shouldHideSecondaryOrbCanvas,
   } = useModelCanvasModes({
-    pathname,
+    pathname: pathnameValue,
     isRestrictedUiAllowed,
     hasSecondaryCanvas,
   });
@@ -1779,7 +1798,7 @@ const ModelCanvas: React.FC<{
         return;
       }
 
-      void fetch("/api/orb-sync", {
+      void fetch(getOrbSyncEndpoint("/api/orb-sync"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1827,23 +1846,33 @@ const ModelCanvas: React.FC<{
     let socket: Socket | null = null;
 
     const connectSocket = async () => {
-      try {
-        await fetch("/api/orb-ws", { cache: "no-store" });
-      } catch {
-        // Ignore bootstrap failures and still attempt socket connection.
+      if (!ORB_SYNC_WS_BASE_URL) {
+        try {
+          await fetch("/api/orb-ws", { cache: "no-store" });
+        } catch {
+          // Ignore bootstrap failures and still attempt socket connection.
+        }
       }
 
       if (disposed) {
         return;
       }
 
-      socket = io({
-        path: "/api/orb-ws/socket.io",
-        transports: ["websocket", "polling"],
-        reconnection: true,
-        reconnectionDelay: 250,
-        reconnectionDelayMax: 1500,
-      });
+      socket = ORB_SYNC_WS_BASE_URL
+        ? io(ORB_SYNC_WS_BASE_URL, {
+            path: "/socket.io",
+            transports: ["websocket", "polling"],
+            reconnection: true,
+            reconnectionDelay: 250,
+            reconnectionDelayMax: 1500,
+          })
+        : io({
+            path: "/api/orb-ws/socket.io",
+            transports: ["websocket", "polling"],
+            reconnection: true,
+            reconnectionDelay: 250,
+            reconnectionDelayMax: 1500,
+          });
       orbSocketRef.current = socket;
 
       socket.on("connect", () => {
@@ -1896,8 +1925,8 @@ const ModelCanvas: React.FC<{
         }
 
         setRemoteOrbRotation({
-          yaw,
-          xRotation,
+          yaw: yaw as number,
+          xRotation: xRotation as number,
           zRotation,
         });
       });
@@ -1923,7 +1952,7 @@ const ModelCanvas: React.FC<{
 
     const pollSyncSnapshot = async () => {
       try {
-        const response = await fetch("/api/orb-sync", {
+        const response = await fetch(getOrbSyncEndpoint("/api/orb-sync"), {
           cache: "no-store",
         });
         if (!response.ok) {
@@ -2024,7 +2053,7 @@ const ModelCanvas: React.FC<{
     const postOrbSyncAction = async (
       action: "claim" | "heartbeat" | "release",
     ) => {
-      const response = await fetch("/api/orb-sync", {
+      const response = await fetch(getOrbSyncEndpoint("/api/orb-sync"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2153,7 +2182,7 @@ const ModelCanvas: React.FC<{
       }
 
       try {
-        await fetch("/api/orb-sync", {
+        await fetch(getOrbSyncEndpoint("/api/orb-sync"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

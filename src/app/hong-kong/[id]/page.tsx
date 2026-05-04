@@ -17,14 +17,14 @@ export default function Page({ params }: { params: { id: string } }) {
       <ModelCanvas
         projectId="hong-kong"
         imageId={params.id}
-        column="2"
+        column="1"
         rotation={[0, -Math.PI / 2, -Math.PI/4]}
         filterStyle="brightness(1.5) contrast(0.9)"
       />
       <ModelCanvas
         projectId="hong-kong"
         imageId={params.id}
-        column="1"
+        column="2"
         rotation={[0, -Math.PI / 2, -Math.PI/4]}
         filterStyle="brightness(1.5) contrast(0.9)"
         doubleBy={38}

@@ -57,7 +57,11 @@ const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
 const OVERLAY_MAP_LABEL_RIGHT_VAR = "--overlay-map-label-right";
 const OVERLAY_MAP_LABEL_BOTTOM_VAR = "--overlay-map-label-bottom";
 
-const parseImageKeyFromPathname = (pathname: string): number | null => {
+const parseImageKeyFromPathname = (pathname: string | null): number | null => {
+  if (!pathname) {
+    return null;
+  }
+
   const segment = pathname.split("/").filter(Boolean)[1];
   const parsed = Number.parseInt(segment ?? "", 10);
 
