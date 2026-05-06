@@ -53,6 +53,13 @@ const ORB_SYNC_POLL_INTERVAL_MS = 120;
 const ORB_SYNC_CAMERA_SEND_INTERVAL_MS = 120;
 const ORB_SYNC_ROTATION_SEND_INTERVAL_MS = 120;
 const ORB_SYNC_HEARTBEAT_INTERVAL_MS = 2000;
+const ORB_LISTENER_VIDEO_LOOP_MULTIPLIER = 2;
+const ORB_CAMERA_ZOOM = 118;
+const ORB3D_CAMERA_ZOOM = 74;
+const ORB_FIXED_DIAMETER_PX_TOUCH = 560;
+const ORB3D_FIXED_DIAMETER_PX_TOUCH = 360;
+const TRACKING_CAMERA_ENABLED_SESSION_KEY = "streets-tracking-camera-enabled";
+const TRACKING_CAMERA_DEVICE_SESSION_KEY = "streets-tracking-camera-device-id";
 const ORB_TONE_MAPPING_EXPOSURE = 1.15;
 const SPHERE_TONE_MAPPING_EXPOSURE = 1.05;
 const ORB_SYNC_SERVER_URL = (
@@ -73,6 +80,59 @@ const PROJECT_MEDIA_PRIORITY_AHEAD_COUNT = 3;
 const PROJECT_MEDIA_PRIORITY_BEHIND_COUNT = 1;
 const PROJECT_MEDIA_BLOCKING_PRIORITY_COUNT = 1;
 const preloadedProjects = new Set<ProjectId>();
+const STABLE_VIEWPORT_HEIGHT = "100svh";
+const STABLE_HALF_VIEWPORT_HEIGHT = "50svh";
+let lastTrackingCameraEnabled = false;
+let lastTrackingCameraDeviceId = "";
+
+const readSessionBoolean = (key: string): boolean | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const value = window.sessionStorage.getItem(key);
+    if (value === "1") {
+      return true;
+    }
+    if (value === "0") {
+      return false;
+    }
+  } catch {
+    // Ignore storage read failures.
+  }
+
+  return null;
+};
+
+const readSessionString = (key: string): string | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const value = window.sessionStorage.getItem(key);
+    if (typeof value === "string" && value.length) {
+      return value;
+    }
+  } catch {
+    // Ignore storage read failures.
+  }
+
+  return null;
+};
+
+const writeSessionValue = (key: string, value: string) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures.
+  }
+};
 
 const drainResponseBody = async (response: Response) => {
   if (!response.body) {
@@ -547,10 +607,28 @@ const OrbControls: React.FC<{
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
             Rotation Offsets
           </p>
+          <p className="text-[11px] text-white/60">
+            Fine-tune rotation offsets: Y = yaw, X = pitch, Z = roll.
+          </p>
           {[
-            { id: "y" as const, label: "Y Offset", min: -Math.PI * 2, max: Math.PI * 2 },
-            { id: "x" as const, label: "X Offset", min: -Math.PI, max: Math.PI },
-            { id: "z" as const, label: "Z Offset", min: -Math.PI * 2, max: Math.PI * 2 },
+            {
+              id: "y" as const,
+              label: "Y Rotation Offset",
+              min: -8,
+              max: 8,
+            },
+            {
+              id: "x" as const,
+              label: "X Rotation Offset",
+              min: -Math.PI,
+              max: Math.PI,
+            },
+            {
+              id: "z" as const,
+              label: "Z Rotation Offset",
+              min: -Math.PI * 2,
+              max: Math.PI * 2,
+            },
           ].map(({ id, label, min, max }) => (
             <label className="block" key={id}>
               <div className="mb-1 flex items-center justify-between gap-3">
@@ -889,6 +967,7 @@ const ProjectScene: React.FC<{
   useLocalAssetFallback?: boolean;
   mediaSessionKey: string;
   transcriptSyncKey: string;
+  lockOrbSizePxOnTouch?: boolean;
 }> = ({
   projectId,
   currentModel,
@@ -918,6 +997,7 @@ const ProjectScene: React.FC<{
   useLocalAssetFallback = false,
   mediaSessionKey,
   transcriptSyncKey,
+  lockOrbSizePxOnTouch = false,
 }) => {
   const textureIndex = (doubleBy ? doubleBy + currentModel : currentModel) - 1;
   const activeMediaUrl =
@@ -930,8 +1010,19 @@ const ProjectScene: React.FC<{
   );
   const isOrbVisualMode = Boolean(orbMode || orb3DMode);
   const rotationOffset = rotation ?? [0, 0, 0];
+  const fixedTouchOrbDiameterPx = orb3DMode
+    ? ORB3D_FIXED_DIAMETER_PX_TOUCH
+    : ORB_FIXED_DIAMETER_PX_TOUCH;
+  const fixedTouchOrbZoom = orb3DMode ? ORB3D_CAMERA_ZOOM : ORB_CAMERA_ZOOM;
+  const fixedTouchOrbRadius =
+    fixedTouchOrbDiameterPx / (2 * fixedTouchOrbZoom);
+  const effectiveOrbRadius =
+    lockOrbSizePxOnTouch && isOrbVisualMode
+      ? fixedTouchOrbRadius
+      : orbSettings.radius;
   const effectiveOrbSettings = {
     ...orbSettings,
+    radius: effectiveOrbRadius,
     yaw: orbSettings.yaw + rotationOffset[1] + rotationOffsets.y,
     xRotation: orbSettings.xRotation + rotationOffset[0] + rotationOffsets.x,
     zRotation: orbSettings.zRotation + rotationOffset[2] + rotationOffsets.z,
@@ -1081,8 +1172,22 @@ const ModelCanvas: React.FC<{
   );
   const [showOrbControls, setShowOrbControls] = useState(false);
   const [trackedSubjects, setTrackedSubjects] = useState<TrackedSubject[]>([]);
-  const [trackingCameraEnabled, setTrackingCameraEnabled] = useState(false);
-  const [trackingCameraDeviceId, setTrackingCameraDeviceId] = useState("");
+  const [trackingCameraEnabled, setTrackingCameraEnabled] = useState(() => {
+    const sessionValue = readSessionBoolean(TRACKING_CAMERA_ENABLED_SESSION_KEY);
+    if (sessionValue !== null) {
+      return sessionValue;
+    }
+
+    return lastTrackingCameraEnabled;
+  });
+  const [trackingCameraDeviceId, setTrackingCameraDeviceId] = useState(() => {
+    const sessionValue = readSessionString(TRACKING_CAMERA_DEVICE_SESSION_KEY);
+    if (sessionValue !== null) {
+      return sessionValue;
+    }
+
+    return lastTrackingCameraDeviceId;
+  });
   const [trackingFlipX, setTrackingFlipX] = useState(true);
   const [trackingFlipY, setTrackingFlipY] = useState(false);
   const [trackingBackdropEnabled, setTrackingBackdropEnabled] = useState(true);
@@ -1125,6 +1230,10 @@ const ModelCanvas: React.FC<{
   const [orbSyncError, setOrbSyncError] = useState<string | null>(null);
   const [orbRoleWarning, setOrbRoleWarning] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [lockedTouchOrbViewportPx, setLockedTouchOrbViewportPx] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const activeTrackedSubjectRef = useRef<TrackedSubject | null>(null);
   const orbSocketRef = useRef<Socket | null>(null);
   const orbSocketConnectedRef = useRef(false);
@@ -1134,6 +1243,7 @@ const ModelCanvas: React.FC<{
   const lastOrbRotationPayloadRef = useRef<OrbRotationSnapshot | null>(null);
   const lastLiveRotationUiUpdateAtRef = useRef(0);
   const liveOrbRotationPreviewRef = useRef<OrbRotationSnapshot | null>(null);
+  const lastPublishedListenerSceneKeyRef = useRef<string>("");
   const useLocalAssetFallback = PROJECTS_WITH_LOCAL_ASSET_FALLBACK.has(
     projectId,
   );
@@ -1180,6 +1290,61 @@ const ModelCanvas: React.FC<{
     const params = new URLSearchParams(window.location.search);
     setOrbAutoplayEnabledState(params.get("autoplay") !== "off");
   }, [pathname]);
+
+  useEffect(() => {
+    lastTrackingCameraEnabled = trackingCameraEnabled;
+    writeSessionValue(
+      TRACKING_CAMERA_ENABLED_SESSION_KEY,
+      trackingCameraEnabled ? "1" : "0",
+    );
+  }, [trackingCameraEnabled]);
+
+  useEffect(() => {
+    lastTrackingCameraDeviceId = trackingCameraDeviceId;
+    if (trackingCameraDeviceId.length) {
+      writeSessionValue(
+        TRACKING_CAMERA_DEVICE_SESSION_KEY,
+        trackingCameraDeviceId,
+      );
+    }
+  }, [trackingCameraDeviceId]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !isTouchDevice ||
+      !showOrbUi ||
+      !isOrbLikeMode
+    ) {
+      setLockedTouchOrbViewportPx(null);
+      return;
+    }
+
+    const syncLockedViewport = () => {
+      const width = Math.max(1, Math.round(window.innerWidth));
+      const height = Math.max(1, Math.round(window.innerHeight));
+      setLockedTouchOrbViewportPx((current) => {
+        if (
+          current &&
+          Math.abs(current.width - width) < 2 &&
+          Math.abs(current.height - height) < 2
+        ) {
+          return current;
+        }
+        return { width, height };
+      });
+    };
+
+    syncLockedViewport();
+    const handleOrientationChange = () => {
+      window.setTimeout(syncLockedViewport, 180);
+    };
+
+    window.addEventListener("orientationchange", handleOrientationChange);
+    return () => {
+      window.removeEventListener("orientationchange", handleOrientationChange);
+    };
+  }, [isOrbLikeMode, isTouchDevice, showOrbUi]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1589,7 +1754,9 @@ const ModelCanvas: React.FC<{
     "1": {
         position: "fixed",
         width: isSmallScreen ? "100vw" : "50vw",
-        height: isSmallScreen ? "50vh" : "100vh",
+        height: isSmallScreen
+          ? STABLE_HALF_VIEWPORT_HEIGHT
+          : STABLE_VIEWPORT_HEIGHT,
         top: 0,
         left: isSmallScreen ? 0 : '50vw',
         filter: filterStyle
@@ -1597,8 +1764,10 @@ const ModelCanvas: React.FC<{
   "2": {
         position: "fixed",
         width: isSmallScreen ? "100vw" : "50vw",
-        height: isSmallScreen ? "50vh" : "100vh",
-        top: isSmallScreen ? "50vh" : 0,
+        height: isSmallScreen
+          ? STABLE_HALF_VIEWPORT_HEIGHT
+          : STABLE_VIEWPORT_HEIGHT,
+        top: isSmallScreen ? STABLE_HALF_VIEWPORT_HEIGHT : 0,
         left: 0,
         filter: filterStyle
     }
@@ -1639,8 +1808,15 @@ const ModelCanvas: React.FC<{
     }
 
     const isVideoAutoplayStep = isVideoMediaUrl(activeMediaUrl);
+    const listenerLoopMultiplier =
+      listenerMode && isVideoAutoplayStep
+        ? ORB_LISTENER_VIDEO_LOOP_MULTIPLIER
+        : 1;
     const autoplayDelayMs = isVideoAutoplayStep
-      ? Math.max(activeVideoDurationMs ?? ORB_AUTOPLAY_VIDEO_FALLBACK_MS, 400)
+      ? Math.max(
+          activeVideoDurationMs ?? ORB_AUTOPLAY_VIDEO_FALLBACK_MS,
+          400,
+        ) * listenerLoopMultiplier
       : ORB_AUTOPLAY_INTERVAL_MS;
 
     const timeoutId = window.setTimeout(() => {
@@ -1677,6 +1853,7 @@ const ModelCanvas: React.FC<{
     activeVideoDurationMs,
     currentModel,
     isOrbLikeMode,
+    listenerMode,
     maxOrbAutoplayIndex,
     orbAutoplayEnabled,
     projectId,
@@ -1739,6 +1916,61 @@ const ModelCanvas: React.FC<{
   useEffect(() => {
     listenerModeRef.current = listenerMode;
   }, [listenerMode]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !showOrbUi ||
+      !isOrbLikeMode ||
+      !listenerMode
+    ) {
+      return;
+    }
+
+    const sceneKey = `${projectId}:${currentModel}`;
+    if (lastPublishedListenerSceneKeyRef.current === sceneKey) {
+      return;
+    }
+
+    let disposed = false;
+    const publishScene = async () => {
+      try {
+        const response = await fetch(getOrbSyncEndpoint("/api/orb-sync"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          cache: "no-store",
+          body: JSON.stringify({
+            action: "scene",
+            clientId: orbClientIdRef.current,
+            projectId,
+            modelIndex: currentModel,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed scene sync action.");
+        }
+
+        if (disposed) {
+          return;
+        }
+
+        lastPublishedListenerSceneKeyRef.current = sceneKey;
+        setOrbSyncError(null);
+      } catch {
+        if (!disposed) {
+          setOrbSyncError("Sync server unavailable.");
+        }
+      }
+    };
+
+    void publishScene();
+    return () => {
+      disposed = true;
+    };
+  }, [currentModel, isOrbLikeMode, listenerMode, projectId, showOrbUi]);
 
   useEffect(() => {
     activeBroadcasterIdRef.current = activeBroadcasterId;
@@ -1962,6 +2194,11 @@ const ModelCanvas: React.FC<{
         const payload = (await response.json()) as {
           broadcasterId?: string | null;
           rotation?: { yaw?: number; xRotation?: number; zRotation?: number } | null;
+          scene?: {
+            projectId?: string;
+            modelIndex?: number;
+            updatedBy?: string;
+          } | null;
         };
 
         if (disposed) {
@@ -2014,6 +2251,45 @@ const ModelCanvas: React.FC<{
           setRemoteOrbRotation(null);
         }
 
+        const sceneProjectId =
+          typeof payload.scene?.projectId === "string"
+            ? payload.scene.projectId
+            : null;
+        const sceneModelIndex =
+          typeof payload.scene?.modelIndex === "number"
+            ? payload.scene.modelIndex
+            : null;
+        const sceneUpdatedBy =
+          typeof payload.scene?.updatedBy === "string"
+            ? payload.scene.updatedBy
+            : null;
+
+        if (
+          !listenerMode &&
+          isSelfBroadcaster &&
+          sceneProjectId === projectId &&
+          Number.isFinite(sceneModelIndex) &&
+          sceneUpdatedBy &&
+          sceneUpdatedBy !== orbClientIdRef.current
+        ) {
+          const nextModel = Math.min(
+            Math.max(Math.round(sceneModelIndex as number), 1),
+            CONFIG[projectId].numberOfImages,
+          );
+
+          if (nextModel !== currentModel) {
+            setCurrentModel(nextModel);
+            setOrbAutoplayEnabledState(false);
+
+            if (typeof window !== "undefined") {
+              const query = window.location.search ?? "";
+              router.replace(`/${projectId}/${nextModel.toString()}${query}`, {
+                scroll: false,
+              });
+            }
+          }
+        }
+
         setOrbSyncError(null);
       } catch {
         if (disposed) {
@@ -2034,7 +2310,7 @@ const ModelCanvas: React.FC<{
       disposed = true;
       window.clearInterval(intervalId);
     };
-  }, [isOrbLikeMode, listenerMode, showOrbUi]);
+  }, [currentModel, isOrbLikeMode, listenerMode, projectId, router, showOrbUi]);
 
   useEffect(() => {
     if (
@@ -2384,8 +2660,14 @@ const ModelCanvas: React.FC<{
             ? {
                 position: "fixed",
                 inset: 0,
-                width: "100vw",
-                height: "100vh",
+                width:
+                  isTouchDevice && lockedTouchOrbViewportPx
+                    ? `${lockedTouchOrbViewportPx.width}px`
+                    : "100vw",
+                height:
+                  isTouchDevice && lockedTouchOrbViewportPx
+                    ? `${lockedTouchOrbViewportPx.height}px`
+                    : STABLE_VIEWPORT_HEIGHT,
                 zIndex: 10,
                 filter: filterStyle,
                 backgroundColor: "transparent",
@@ -2410,7 +2692,7 @@ const ModelCanvas: React.FC<{
           isOrbLikeMode
             ? {
                 position: [0, 0, 12],
-                zoom: isOrb3DMode ? 74 : 118,
+                zoom: isOrb3DMode ? ORB3D_CAMERA_ZOOM : ORB_CAMERA_ZOOM,
                 near: 0.1,
                 far: 1000,
               }
@@ -2449,6 +2731,7 @@ const ModelCanvas: React.FC<{
             useLocalAssetFallback={useLocalAssetFallback}
             mediaSessionKey={mediaSessionKey}
             transcriptSyncKey={transcriptSyncKey}
+            lockOrbSizePxOnTouch={isTouchDevice}
           />
         </Suspense>
       </Canvas>

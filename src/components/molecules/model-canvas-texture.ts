@@ -109,13 +109,14 @@ const getOrCreateSharedVideoSession = (sessionKey: string): SharedVideoSession =
   return nextSession;
 };
 
-const pauseSharedVideoSession = (sessionKey: string) => {
+const stopSharedVideoSession = (sessionKey: string) => {
   const session = sharedVideoSessions.get(sessionKey);
   if (!session) {
     return;
   }
 
   session.videoElement.pause();
+  session.videoElement.muted = true;
 };
 
 export const useActiveMediaTexture = (
@@ -250,7 +251,7 @@ export const useActiveMediaTexture = (
       setActiveTexture(session.videoTexture);
       setVideoSource(mediaUrl);
     } else {
-      pauseSharedVideoSession(sessionKey);
+      stopSharedVideoSession(sessionKey);
 
       const loader = new TextureLoader();
       let hasAttemptedFallback = false;
@@ -297,6 +298,10 @@ export const useActiveMediaTexture = (
 
       cleanupVideoHandlers?.();
       cleanupTranscriptHandlers?.();
+
+      if (isVideoMediaUrl(mediaUrl)) {
+        stopSharedVideoSession(sessionKey);
+      }
     };
   }, [mediaUrl, sessionKey, transcriptSyncKey, useLocalAssetFallback]);
 

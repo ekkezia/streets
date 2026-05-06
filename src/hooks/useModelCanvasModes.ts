@@ -16,7 +16,7 @@ const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
 
 const DEFAULT_OVERLAY_LAYOUT_SETTINGS: OverlayLayoutSettings = {
   mapRight: 25,
-  mapVertical: 660,
+  mapVertical: 215,
   transcriptRight: 640,
   transcriptVertical: -12,
   transcriptCenterOffset: -30,

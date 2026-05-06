@@ -17,10 +17,18 @@ type OrbRotationState = {
   updatedAt: number;
 };
 
+type OrbSceneState = {
+  projectId: string;
+  modelIndex: number;
+  updatedAt: number;
+  updatedBy: string;
+};
+
 type OrbSyncState = {
   broadcasterId: string | null;
   broadcasterLastSeen: number;
   rotation: OrbRotationState | null;
+  scene: OrbSceneState | null;
 };
 
 type OrbSyncSnapshot = {
@@ -28,6 +36,7 @@ type OrbSyncSnapshot = {
   broadcasterId: string | null;
   hasBroadcaster: boolean;
   rotation: OrbRotationState | null;
+  scene: OrbSceneState | null;
   timestamp: number;
 };
 
@@ -65,12 +74,30 @@ const toNumber = (value: unknown): number | null => {
   return null;
 };
 
+const sanitizeProjectId = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed.length || trimmed.length > 64) {
+    return null;
+  }
+
+  if (!/^[a-z0-9-]+$/i.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+};
+
 const getState = (): OrbSyncState => {
   if (!global.__streetsOrbSyncState) {
     global.__streetsOrbSyncState = {
       broadcasterId: null,
       broadcasterLastSeen: 0,
       rotation: null,
+      scene: null,
     };
   }
 
@@ -97,6 +124,7 @@ const createSnapshot = (
   broadcasterId: state.broadcasterId,
   hasBroadcaster: Boolean(state.broadcasterId),
   rotation: state.rotation,
+  scene: state.scene,
   timestamp: Date.now(),
 });
 
@@ -248,6 +276,35 @@ export async function POST(request: Request) {
       updatedAt: Date.now(),
     };
     state.broadcasterLastSeen = Date.now();
+
+    return NextResponse.json(createSnapshot(state, true), {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    });
+  }
+
+  if (action === "scene") {
+    const projectId = sanitizeProjectId(data.projectId);
+    const modelIndex = toNumber(data.modelIndex);
+    if (!projectId || modelIndex === null) {
+      return NextResponse.json(
+        { ok: false, error: "invalid_scene_payload" },
+        { status: 400 },
+      );
+    }
+
+    const clampedIndex = Math.min(
+      2000,
+      Math.max(1, Math.round(modelIndex)),
+    );
+
+    state.scene = {
+      projectId,
+      modelIndex: clampedIndex,
+      updatedAt: Date.now(),
+      updatedBy: clientId,
+    };
 
     return NextResponse.json(createSnapshot(state, true), {
       headers: {

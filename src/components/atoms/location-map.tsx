@@ -14,7 +14,12 @@ import {
 } from "react";
 import maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
-import Map, { Layer, Marker, Source } from "react-map-gl/maplibre";
+import Map, {
+  Layer,
+  Marker,
+  Source,
+  type MapRef,
+} from "react-map-gl/maplibre";
 
 type LocationPoint = {
   key: number;
@@ -40,7 +45,11 @@ const OSM_RASTER_STYLE: StyleSpecification = {
   sources: {
     osm: {
       type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"] as string[],
+      tiles: [
+        "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      ] as string[],
       tileSize: 256,
       attribution: "© OpenStreetMap contributors",
     },
@@ -53,9 +62,53 @@ const OSM_RASTER_STYLE: StyleSpecification = {
     },
   ],
 };
+
+const CARTO_LIGHT_RASTER_STYLE: StyleSpecification = {
+  version: 8 as const,
+  sources: {
+    carto: {
+      type: "raster",
+      tiles: [
+        "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+      ] as string[],
+      tileSize: 256,
+      attribution:
+        "© OpenStreetMap contributors © CARTO",
+    },
+  },
+  layers: [
+    {
+      id: "carto",
+      type: "raster",
+      source: "carto",
+    },
+  ],
+};
 const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
 const OVERLAY_MAP_LABEL_RIGHT_VAR = "--overlay-map-label-right";
 const OVERLAY_MAP_LABEL_BOTTOM_VAR = "--overlay-map-label-bottom";
+const MAP_TILE_SERVICE_WORKER_PATH = "/sw-map-tiles.js";
+const TILE_PREFETCH_ZOOM_LEVELS = [15, 16, 17];
+const TILE_PREFETCH_MAX_URLS_PER_STYLE = 120;
+const TILE_PREFETCH_CONCURRENCY = 8;
+const TILE_PREFETCH_PADDING_TILES = 1;
+
+const TILE_TEMPLATE_GROUPS = [
+  [
+    "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  ],
+  [
+    "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    "https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+  ],
+] as const;
 
 const parseImageKeyFromPathname = (pathname: string | null): number | null => {
   if (!pathname) {
@@ -94,6 +147,87 @@ const parseCssVarPx = (name: string, fallback: number) => {
   return Number.isFinite(numericValue) ? numericValue : fallback;
 };
 
+const lngLatToTile = (longitude: number, latitude: number, zoom: number) => {
+  const clampedLat = Math.min(85.05112878, Math.max(-85.05112878, latitude));
+  const n = 2 ** zoom;
+  const x = Math.floor(((longitude + 180) / 360) * n);
+  const latRad = (clampedLat * Math.PI) / 180;
+  const y = Math.floor(
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n,
+  );
+
+  return {
+    x: Math.max(0, Math.min(n - 1, x)),
+    y: Math.max(0, Math.min(n - 1, y)),
+  };
+};
+
+const buildPrefetchTileUrls = (
+  points: Array<{ latitude: number; longitude: number }>,
+) => {
+  if (!points.length) {
+    return [] as string[];
+  }
+
+  const bounds = points.reduce(
+    (acc, point) => ({
+      minLat: Math.min(acc.minLat, point.latitude),
+      maxLat: Math.max(acc.maxLat, point.latitude),
+      minLng: Math.min(acc.minLng, point.longitude),
+      maxLng: Math.max(acc.maxLng, point.longitude),
+    }),
+    {
+      minLat: points[0].latitude,
+      maxLat: points[0].latitude,
+      minLng: points[0].longitude,
+      maxLng: points[0].longitude,
+    },
+  );
+
+  const urls = new Set<string>();
+
+  TILE_TEMPLATE_GROUPS.forEach((templates) => {
+    let addedForStyle = 0;
+
+    for (const zoom of TILE_PREFETCH_ZOOM_LEVELS) {
+      const n = 2 ** zoom;
+      const northWest = lngLatToTile(bounds.minLng, bounds.maxLat, zoom);
+      const southEast = lngLatToTile(bounds.maxLng, bounds.minLat, zoom);
+      const minX = Math.max(0, Math.min(n - 1, northWest.x) - TILE_PREFETCH_PADDING_TILES);
+      const maxX = Math.max(0, Math.min(n - 1, southEast.x) + TILE_PREFETCH_PADDING_TILES);
+      const minY = Math.max(0, Math.min(n - 1, northWest.y) - TILE_PREFETCH_PADDING_TILES);
+      const maxY = Math.max(0, Math.min(n - 1, southEast.y) + TILE_PREFETCH_PADDING_TILES);
+
+      for (let x = minX; x <= maxX; x += 1) {
+        for (let y = minY; y <= maxY; y += 1) {
+          if (addedForStyle >= TILE_PREFETCH_MAX_URLS_PER_STYLE) {
+            break;
+          }
+
+          const template = templates[(x + y) % templates.length];
+          urls.add(
+            template
+              .replace("{z}", String(zoom))
+              .replace("{x}", String(x))
+              .replace("{y}", String(y)),
+          );
+          addedForStyle += 1;
+        }
+
+        if (addedForStyle >= TILE_PREFETCH_MAX_URLS_PER_STYLE) {
+          break;
+        }
+      }
+
+      if (addedForStyle >= TILE_PREFETCH_MAX_URLS_PER_STYLE) {
+        break;
+      }
+    }
+  });
+
+  return Array.from(urls);
+};
+
 const LocationMap: React.FC<{
   zoom?: number;
   width?: number;
@@ -113,6 +247,11 @@ const LocationMap: React.FC<{
     longitude: 0,
     zoom,
   });
+  const [useFallbackMapStyle, setUseFallbackMapStyle] = useState(false);
+  const [tileLoadWarning, setTileLoadWarning] = useState(false);
+  const mapRef = useRef<MapRef | null>(null);
+  const hasRegisteredTileSwRef = useRef(false);
+  const prefetchedTileAreaKeysRef = useRef<Set<string>>(new Set());
   const dragStateRef = useRef<{
     pointerId: number;
     startX: number;
@@ -153,6 +292,30 @@ const LocationMap: React.FC<{
       window.removeEventListener("resize", syncViewMode);
     };
   }, [pathname]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !("serviceWorker" in navigator) ||
+      hasRegisteredTileSwRef.current
+    ) {
+      return;
+    }
+
+    if (!window.isSecureContext && window.location.hostname !== "localhost") {
+      return;
+    }
+
+    hasRegisteredTileSwRef.current = true;
+    void navigator.serviceWorker
+      .register(MAP_TILE_SERVICE_WORKER_PATH, {
+        scope: "/",
+        updateViaCache: "none",
+      })
+      .catch(() => {
+        // Ignore SW registration failures and rely on default HTTP cache.
+      });
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -203,6 +366,49 @@ const LocationMap: React.FC<{
       )
       .sort((a, b) => a.key - b.key);
   }, [projectId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !locationPoints.length) {
+      return;
+    }
+
+    const key = `${projectId}:${locationPoints.length}`;
+    if (prefetchedTileAreaKeysRef.current.has(key)) {
+      return;
+    }
+
+    prefetchedTileAreaKeysRef.current.add(key);
+    const urls = buildPrefetchTileUrls(locationPoints);
+    if (!urls.length) {
+      return;
+    }
+
+    let cancelled = false;
+    let cursor = 0;
+    const workers = Array.from({ length: TILE_PREFETCH_CONCURRENCY }, async () => {
+      while (!cancelled) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= urls.length) {
+          break;
+        }
+
+        try {
+          await fetch(urls[index], {
+            mode: "no-cors",
+            cache: "reload",
+          });
+        } catch {
+          // Keep warming remaining tiles even if some requests fail.
+        }
+      }
+    });
+
+    void Promise.allSettled(workers);
+    return () => {
+      cancelled = true;
+    };
+  }, [locationPoints, projectId]);
 
   const currentImageKey = useMemo(() => {
     const keyFromPath = parseImageKeyFromPathname(pathname);
@@ -399,20 +605,24 @@ const LocationMap: React.FC<{
     }
   }, []);
 
-  const mapWidth = isOrbLikeView ? width : "clamp(24vw, 25vw, 150px)";
-  const mapHeight = isOrbLikeView ? height : "clamp(16vw, 20vw, 120px)";
+  const orbMapWidth = isTouchOrbView ? height : width;
+  const orbMapHeight = isTouchOrbView ? width : height;
+  const mapWidth = isOrbLikeView ? orbMapWidth : "clamp(24vw, 25vw, 150px)";
+  const mapHeight = isOrbLikeView ? orbMapHeight : "clamp(16vw, 20vw, 120px)";
   const mapBottom = isOrbLikeView ? "var(--overlay-map-vertical, 8px)" : "8px";
   const mapRight = isOrbLikeView ? "var(--overlay-map-right, 8px)" : "8px";
-  const mapTransform = isTouchOrbView ? "rotate(-90deg)" : undefined;
+  const mapTransform = isTouchOrbView ? "rotate(0deg)" : undefined;
   const mapTransformOrigin = isTouchOrbView ? "bottom right" : undefined;
+  const mapWidthPx = typeof mapWidth === "number" ? mapWidth : width;
+  const mapHeightPx = typeof mapHeight === "number" ? mapHeight : height;
   const mapRightPx = parseCssVarPx("--overlay-map-right", 8);
   const mapVerticalPx = parseCssVarPx("--overlay-map-vertical", 8);
   const defaultCoordinateBadgeRightPx = isTouchDevice
-    ? mapRightPx - height - 12
+    ? mapRightPx - mapHeightPx - 12
     : mapRightPx;
   const defaultCoordinateBadgeBottomPx = isTouchDevice
-    ? mapVerticalPx + width / 2
-    : mapVerticalPx + height + 8;
+    ? mapVerticalPx + mapWidthPx / 2
+    : mapVerticalPx + mapHeightPx + 8;
   const coordinateBadgeRight = `var(${OVERLAY_MAP_LABEL_RIGHT_VAR}, ${defaultCoordinateBadgeRightPx}px)`;
   const coordinateBadgeBottom = `var(${OVERLAY_MAP_LABEL_BOTTOM_VAR}, ${defaultCoordinateBadgeBottomPx}px)`;
 
@@ -505,6 +715,62 @@ const LocationMap: React.FC<{
     zIndex: 200,
     boxShadow: "0px 0px 2px 1px rgba(0, 0, 0, 0.2)",
   };
+  const activeMapStyle = useFallbackMapStyle
+    ? CARTO_LIGHT_RASTER_STYLE
+    : OSM_RASTER_STYLE;
+
+  const handleMapLoadError = useCallback(() => {
+    if (!useFallbackMapStyle) {
+      setUseFallbackMapStyle(true);
+      return;
+    }
+
+    setTileLoadWarning(true);
+  }, [useFallbackMapStyle]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const resizeMap = () => {
+      const map = mapRef.current;
+      if (!map) {
+        return;
+      }
+
+      try {
+        map.resize();
+      } catch {
+        // Ignore map resize race conditions while switching views/routes.
+      }
+    };
+
+    const timers: number[] = [];
+    const scheduleResize = () => {
+      resizeMap();
+      timers.push(window.setTimeout(resizeMap, 120));
+      timers.push(window.setTimeout(resizeMap, 320));
+    };
+
+    scheduleResize();
+    window.addEventListener("resize", scheduleResize);
+    window.addEventListener("orientationchange", scheduleResize);
+
+    return () => {
+      window.removeEventListener("resize", scheduleResize);
+      window.removeEventListener("orientationchange", scheduleResize);
+      timers.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [
+    activeLatitude,
+    activeLongitude,
+    isOrbLikeView,
+    isTouchOrbView,
+    mapHeight,
+    mapWidth,
+    pathname,
+  ]);
 
   return (
     <div>
@@ -530,6 +796,7 @@ const LocationMap: React.FC<{
         📍 [{formatCoordinate(activeLatitude)}°, {formatCoordinate(activeLongitude)}°]
       </div>
       <Map
+        ref={mapRef}
         mapLib={maplibregl}
         latitude={mapViewState.latitude}
         longitude={mapViewState.longitude}
@@ -550,8 +817,14 @@ const LocationMap: React.FC<{
             zoom: event.viewState.zoom,
           }))
         }
+        onLoad={() => {
+          setTileLoadWarning(false);
+        }}
+        onError={() => {
+          handleMapLoadError();
+        }}
         style={mapFrameStyle}
-        mapStyle={OSM_RASTER_STYLE}
+        mapStyle={activeMapStyle}
       >
         {allJourneyLineData && (
           <Source id={`journey-all-${projectId}`} type="geojson" data={allJourneyLineData}>
@@ -649,6 +922,23 @@ const LocationMap: React.FC<{
           );
         })}
       </Map>
+      {tileLoadWarning && (
+        <div
+          className={`fixed rounded-md border border-amber-300/80 bg-black/75 px-2 py-1 text-[11px] text-amber-100 ${
+            isOrbLikeView ? "z-[210]" : "right-2 top-12 z-[198]"
+          }`}
+          style={
+            isOrbLikeView
+              ? {
+                  right: mapRight,
+                  bottom: `calc(${mapBottom} + ${mapHeightPx}px + 8px)`,
+                }
+              : undefined
+          }
+        >
+          Basemap unavailable. Route points still active.
+        </div>
+      )}
       {canDragMapPosition && (
         <div
           className="fixed z-[205] rounded-md border border-cyan-300/70 bg-cyan-300/10"
