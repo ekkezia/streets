@@ -45,8 +45,10 @@ const POINTER_YAW_RANGE = Math.PI;
 const POINTER_TILT_RANGE = Math.PI;
 const ROTATION_SMOOTHING = 10;
 const POSITION_SMOOTHING = 8;
-const HEAD_ROTATE_PITCH_RANGE = Math.PI * 0.98;
-const HEAD_ROTATE_YAW_RANGE = Math.PI * 0.98;
+// `normalizedX/normalizedY` are centered to [-0.5, 0.5], so using 2π here
+// yields [-π, π] output (a full 360-degree span) at strength 1.0.
+const HEAD_ROTATE_PITCH_RANGE = Math.PI * 2;
+const HEAD_ROTATE_YAW_RANGE = Math.PI * 2;
 const HEAD_ROTATE_TILT_RANGE = Math.PI * 0.75;
 const HEAD_INPUT_DEADZONE = 0.025;
 const HEAD_CROSSTALK_DAMPING = 0.28;
