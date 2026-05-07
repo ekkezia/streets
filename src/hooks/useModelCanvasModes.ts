@@ -17,13 +17,13 @@ export type OverlayLayoutSettings = {
 const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
 
 const DEFAULT_OVERLAY_LAYOUT_SETTINGS: OverlayLayoutSettings = {
-  mapRight: 20,
-  mapVertical: 285,
+  mapRight: 58,
+  mapVertical: 228,
   transcriptRight: 640,
   transcriptVertical: -12,
   transcriptCenterOffset: -30,
-  coordinateBadgeRightOffset: -122,
-  coordinateBadgeBottomOffset: 150,
+  coordinateBadgeRightOffset: -106,
+  coordinateBadgeBottomOffset: 102,
 };
 
 export const useModelCanvasModes = ({
