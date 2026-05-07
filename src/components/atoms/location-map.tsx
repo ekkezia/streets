@@ -90,6 +90,8 @@ const CARTO_LIGHT_RASTER_STYLE: StyleSpecification = {
 const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
 const OVERLAY_MAP_LABEL_RIGHT_VAR = "--overlay-map-label-right";
 const OVERLAY_MAP_LABEL_BOTTOM_VAR = "--overlay-map-label-bottom";
+const OVERLAY_MAP_LABEL_RIGHT_OFFSET_VAR = "--overlay-map-label-right-offset";
+const OVERLAY_MAP_LABEL_BOTTOM_OFFSET_VAR = "--overlay-map-label-bottom-offset";
 const MAP_TILE_SERVICE_WORKER_PATH = "/sw-map-tiles.js";
 const TILE_PREFETCH_ZOOM_LEVELS = [15, 16, 17];
 const TILE_PREFETCH_MAX_URLS_PER_STYLE = 120;
@@ -249,6 +251,7 @@ const LocationMap: React.FC<{
   });
   const [useFallbackMapStyle, setUseFallbackMapStyle] = useState(false);
   const [tileLoadWarning, setTileLoadWarning] = useState(false);
+  const [overlayLayoutTick, setOverlayLayoutTick] = useState(0);
   const mapRef = useRef<MapRef | null>(null);
   const hasRegisteredTileSwRef = useRef(false);
   const prefetchedTileAreaKeysRef = useRef<Set<string>>(new Set());
@@ -315,6 +318,28 @@ const LocationMap: React.FC<{
       .catch(() => {
         // Ignore SW registration failures and rely on default HTTP cache.
       });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleOverlayLayoutChange = () => {
+      setOverlayLayoutTick((current) => current + 1);
+    };
+
+    window.addEventListener(
+      OVERLAY_LAYOUT_CHANGE_EVENT,
+      handleOverlayLayoutChange as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        OVERLAY_LAYOUT_CHANGE_EVENT,
+        handleOverlayLayoutChange as EventListener,
+      );
+    };
   }, []);
 
   useEffect(() => {
@@ -617,14 +642,15 @@ const LocationMap: React.FC<{
   const mapHeightPx = typeof mapHeight === "number" ? mapHeight : height;
   const mapRightPx = parseCssVarPx("--overlay-map-right", 8);
   const mapVerticalPx = parseCssVarPx("--overlay-map-vertical", 8);
+  void overlayLayoutTick;
   const defaultCoordinateBadgeRightPx = isTouchDevice
-    ? mapRightPx - mapHeightPx - 12
+    ? mapRightPx + mapWidthPx / 8
     : mapRightPx;
   const defaultCoordinateBadgeBottomPx = isTouchDevice
-    ? mapVerticalPx + mapWidthPx / 2
+    ? mapVerticalPx + mapWidthPx / 8
     : mapVerticalPx + mapHeightPx + 8;
-  const coordinateBadgeRight = `var(${OVERLAY_MAP_LABEL_RIGHT_VAR}, ${defaultCoordinateBadgeRightPx}px)`;
-  const coordinateBadgeBottom = `var(${OVERLAY_MAP_LABEL_BOTTOM_VAR}, ${defaultCoordinateBadgeBottomPx}px)`;
+  const coordinateBadgeRight = `calc(var(${OVERLAY_MAP_LABEL_RIGHT_VAR}, ${defaultCoordinateBadgeRightPx}px) + var(${OVERLAY_MAP_LABEL_RIGHT_OFFSET_VAR}, 0px))`;
+  const coordinateBadgeBottom = `calc(var(${OVERLAY_MAP_LABEL_BOTTOM_VAR}, ${defaultCoordinateBadgeBottomPx}px) + var(${OVERLAY_MAP_LABEL_BOTTOM_OFFSET_VAR}, 0px))`;
 
   const updateCoordinateBadgePosition = useCallback((right: number, bottom: number) => {
     if (typeof window === "undefined") {
@@ -789,6 +815,7 @@ const LocationMap: React.FC<{
                 right: coordinateBadgeRight,
                 bottom: coordinateBadgeBottom,
                 touchAction: canDragCoordinateBadge ? "none" : "auto",
+                transform: 'rotate(-90deg)',
               }
             : undefined
         }

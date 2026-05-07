@@ -708,6 +708,20 @@ const OrbControls: React.FC<{
               max: 420,
               step: 1,
             },
+            {
+              id: "coordinateBadgeRightOffset" as const,
+              label: "Coord Badge Right Offset",
+              min: -520,
+              max: 520,
+              step: 1,
+            },
+            {
+              id: "coordinateBadgeBottomOffset" as const,
+              label: "Coord Badge Bottom Offset",
+              min: -520,
+              max: 520,
+              step: 1,
+            },
           ].map(({ id, label, min, max, step }) => (
             <label className="block" key={id}>
               <div className="mb-1 flex items-center justify-between gap-3">

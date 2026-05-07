@@ -10,16 +10,20 @@ export type OverlayLayoutSettings = {
   transcriptRight: number;
   transcriptVertical: number;
   transcriptCenterOffset: number;
+  coordinateBadgeRightOffset: number;
+  coordinateBadgeBottomOffset: number;
 };
 
 const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
 
 const DEFAULT_OVERLAY_LAYOUT_SETTINGS: OverlayLayoutSettings = {
-  mapRight: 25,
-  mapVertical: 215,
+  mapRight: 20,
+  mapVertical: 285,
   transcriptRight: 640,
   transcriptVertical: -12,
   transcriptCenterOffset: -30,
+  coordinateBadgeRightOffset: -122,
+  coordinateBadgeBottomOffset: 150,
 };
 
 export const useModelCanvasModes = ({
@@ -81,6 +85,14 @@ export const useModelCanvasModes = ({
     root.style.setProperty(
       "--overlay-transcript-center-offset",
       `${overlayLayoutSettings.transcriptCenterOffset}px`,
+    );
+    root.style.setProperty(
+      "--overlay-map-label-right-offset",
+      `${overlayLayoutSettings.coordinateBadgeRightOffset}px`,
+    );
+    root.style.setProperty(
+      "--overlay-map-label-bottom-offset",
+      `${overlayLayoutSettings.coordinateBadgeBottomOffset}px`,
     );
     root.style.setProperty(
       "--overlay-position-edit-enabled",
