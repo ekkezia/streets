@@ -1246,6 +1246,11 @@ const ModelCanvas: React.FC<{
   const [orbRoleWarning, setOrbRoleWarning] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const fullscreenPreferenceRef = useRef(false);
+  const lastCameraPayloadRef = useRef<{
+    x: number;
+    y: number;
+    confidence: number;
+  } | null>(null);
   const [lockedTouchOrbViewportPx, setLockedTouchOrbViewportPx] = useState<{
     width: number;
     height: number;
@@ -2560,18 +2565,18 @@ const ModelCanvas: React.FC<{
 
     const sendCameraData = async () => {
       const subject = activeTrackedSubjectRef.current;
-      const payload = subject
-        ? {
-            x: subject.x,
-            y: subject.y,
-            confidence: subject.confidence,
-          }
-        : {
-            // Keep camera sync alive even when tracking temporarily loses a subject.
-            x: 0.5,
-            y: 0.5,
-            confidence: 0,
-          };
+      if (subject) {
+        lastCameraPayloadRef.current = {
+          x: subject.x,
+          y: subject.y,
+          confidence: subject.confidence,
+        };
+      }
+
+      const payload = lastCameraPayloadRef.current;
+      if (!payload) {
+        return;
+      }
 
       try {
         await fetch(getOrbSyncEndpoint("/api/orb-sync"), {
