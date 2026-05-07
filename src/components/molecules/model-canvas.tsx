@@ -60,6 +60,7 @@ const ORB_FIXED_DIAMETER_PX_TOUCH = 560;
 const ORB3D_FIXED_DIAMETER_PX_TOUCH = 360;
 const TRACKING_CAMERA_ENABLED_SESSION_KEY = "streets-tracking-camera-enabled";
 const TRACKING_CAMERA_DEVICE_SESSION_KEY = "streets-tracking-camera-device-id";
+const FULLSCREEN_PREFERENCE_SESSION_KEY = "streets-fullscreen-preference";
 const ORB_TONE_MAPPING_EXPOSURE = 1.15;
 const SPHERE_TONE_MAPPING_EXPOSURE = 1.05;
 const ORB_SYNC_SERVER_URL = (
@@ -1244,6 +1245,7 @@ const ModelCanvas: React.FC<{
   const [orbSyncError, setOrbSyncError] = useState<string | null>(null);
   const [orbRoleWarning, setOrbRoleWarning] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const fullscreenPreferenceRef = useRef(false);
   const [lockedTouchOrbViewportPx, setLockedTouchOrbViewportPx] = useState<{
     width: number;
     height: number;
@@ -1381,6 +1383,51 @@ const ModelCanvas: React.FC<{
     };
   }, []);
 
+  const getIsFullscreenActive = useCallback(() => {
+    if (typeof document === "undefined") {
+      return false;
+    }
+
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+    };
+    return Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
+  }, []);
+
+  const setFullscreenPreference = useCallback((enabled: boolean) => {
+    fullscreenPreferenceRef.current = enabled;
+    writeSessionValue(FULLSCREEN_PREFERENCE_SESSION_KEY, enabled ? "1" : "0");
+  }, []);
+
+  const requestDocumentFullscreen = useCallback(async () => {
+    if (typeof document === "undefined") {
+      return false;
+    }
+
+    if (getIsFullscreenActive()) {
+      return true;
+    }
+
+    const root = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+
+    try {
+      if (root.requestFullscreen) {
+        await root.requestFullscreen();
+      } else if (root.webkitRequestFullscreen) {
+        await root.webkitRequestFullscreen();
+      } else {
+        return false;
+      }
+    } catch {
+      // Ignore failed fullscreen requests from browser policy restrictions.
+      return false;
+    }
+
+    return getIsFullscreenActive();
+  }, [getIsFullscreenActive]);
+
   const handleToggleFullscreen = useCallback(async () => {
     if (typeof document === "undefined") {
       return;
@@ -1388,18 +1435,12 @@ const ModelCanvas: React.FC<{
 
     const doc = document as Document & {
       webkitExitFullscreen?: () => Promise<void> | void;
-      webkitFullscreenElement?: Element | null;
     };
-    const root = document.documentElement as HTMLElement & {
-      webkitRequestFullscreen?: () => Promise<void> | void;
-    };
-
-    const fullscreenActive = Boolean(
-      doc.fullscreenElement || doc.webkitFullscreenElement,
-    );
+    const fullscreenActive = getIsFullscreenActive();
 
     try {
       if (fullscreenActive) {
+        setFullscreenPreference(false);
         if (doc.exitFullscreen) {
           await doc.exitFullscreen();
         } else if (doc.webkitExitFullscreen) {
@@ -1408,15 +1449,56 @@ const ModelCanvas: React.FC<{
         return;
       }
 
-      if (root.requestFullscreen) {
-        await root.requestFullscreen();
-      } else if (root.webkitRequestFullscreen) {
-        await root.webkitRequestFullscreen();
-      }
+      setFullscreenPreference(true);
+      await requestDocumentFullscreen();
     } catch {
       // Ignore failed fullscreen requests from browser policy restrictions.
     }
-  }, []);
+  }, [
+    getIsFullscreenActive,
+    requestDocumentFullscreen,
+    setFullscreenPreference,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !showOrbUi || !isOrbLikeMode) {
+      return;
+    }
+
+    const preferred = readSessionBoolean(FULLSCREEN_PREFERENCE_SESSION_KEY) === true;
+    fullscreenPreferenceRef.current = preferred;
+    if (!preferred) {
+      return;
+    }
+
+    const applyPreferredFullscreen = () => {
+      if (!fullscreenPreferenceRef.current || getIsFullscreenActive()) {
+        return;
+      }
+      void requestDocumentFullscreen();
+    };
+
+    applyPreferredFullscreen();
+
+    const handleUserGesture = () => {
+      applyPreferredFullscreen();
+    };
+
+    window.addEventListener("pointerdown", handleUserGesture, { passive: true });
+    window.addEventListener("touchend", handleUserGesture, { passive: true });
+    window.addEventListener("keydown", handleUserGesture);
+
+    return () => {
+      window.removeEventListener("pointerdown", handleUserGesture);
+      window.removeEventListener("touchend", handleUserGesture);
+      window.removeEventListener("keydown", handleUserGesture);
+    };
+  }, [
+    getIsFullscreenActive,
+    isOrbLikeMode,
+    requestDocumentFullscreen,
+    showOrbUi,
+  ]);
 
   useEffect(() => {
     if (typeof document === "undefined") {
@@ -1427,9 +1509,20 @@ const ModelCanvas: React.FC<{
       const doc = document as Document & {
         webkitFullscreenElement?: Element | null;
       };
-      setIsFullscreen(
-        Boolean(doc.fullscreenElement || doc.webkitFullscreenElement),
+      const fullscreenActive = Boolean(
+        doc.fullscreenElement || doc.webkitFullscreenElement,
       );
+      setIsFullscreen(fullscreenActive);
+
+      if (!fullscreenActive && fullscreenPreferenceRef.current) {
+        // iPad Safari can drop fullscreen during orientation/UI chrome changes.
+        window.setTimeout(() => {
+          if (!fullscreenPreferenceRef.current || getIsFullscreenActive()) {
+            return;
+          }
+          void requestDocumentFullscreen();
+        }, 120);
+      }
     };
 
     syncFullscreen();
@@ -1446,7 +1539,7 @@ const ModelCanvas: React.FC<{
         syncFullscreen as EventListener,
       );
     };
-  }, []);
+  }, [getIsFullscreenActive, requestDocumentFullscreen]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -2467,9 +2560,18 @@ const ModelCanvas: React.FC<{
 
     const sendCameraData = async () => {
       const subject = activeTrackedSubjectRef.current;
-      if (!subject) {
-        return;
-      }
+      const payload = subject
+        ? {
+            x: subject.x,
+            y: subject.y,
+            confidence: subject.confidence,
+          }
+        : {
+            // Keep camera sync alive even when tracking temporarily loses a subject.
+            x: 0.5,
+            y: 0.5,
+            confidence: 0,
+          };
 
       try {
         await fetch(getOrbSyncEndpoint("/api/orb-sync"), {
@@ -2481,9 +2583,9 @@ const ModelCanvas: React.FC<{
           body: JSON.stringify({
             action: "camera",
             clientId,
-            x: subject.x,
-            y: subject.y,
-            confidence: subject.confidence,
+            x: payload.x,
+            y: payload.y,
+            confidence: payload.confidence,
           }),
         });
 
