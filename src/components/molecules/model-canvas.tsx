@@ -1202,7 +1202,7 @@ const ModelCanvas: React.FC<{
 
     return lastTrackingCameraDeviceId;
   });
-  const [trackingFlipX, setTrackingFlipX] = useState(true);
+  const [trackingFlipX, setTrackingFlipX] = useState(false);
   const [trackingFlipY, setTrackingFlipY] = useState(false);
   const [trackingBackdropEnabled, setTrackingBackdropEnabled] = useState(true);
   const [trackingBackdropOpacity, setTrackingBackdropOpacity] = useState(0.66);
