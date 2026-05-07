@@ -22,8 +22,8 @@ const DEFAULT_OVERLAY_LAYOUT_SETTINGS: OverlayLayoutSettings = {
   transcriptRight: 640,
   transcriptVertical: -12,
   transcriptCenterOffset: -30,
-  coordinateBadgeRightOffset: -106,
-  coordinateBadgeBottomOffset: 102,
+  coordinateBadgeRightOffset: -142,
+  coordinateBadgeBottomOffset: 158,
 };
 
 export const useModelCanvasModes = ({
