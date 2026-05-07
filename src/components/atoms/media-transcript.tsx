@@ -121,7 +121,7 @@ const parseCssVarPx = (name: string, fallback: number) => {
 
 const MediaTranscript: React.FC<MediaTranscriptProps> = ({
   projectId,
-  width = "50vw",
+  width = "51vw",
   height = 84,
 }) => {
   const pathname = usePathname();
