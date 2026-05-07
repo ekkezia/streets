@@ -4,6 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const BROADCASTER_STALE_MS = 8000;
+const CAMERA_ROTATION_FALLBACK_GRACE_MS = 600;
 const CAMERA_YAW_RANGE = Math.PI * 1.1;
 const CAMERA_TILT_RANGE = Math.PI * 0.75;
 const ROTATION_YAW_LIMIT = Math.PI * 4;
@@ -29,6 +30,7 @@ type OrbSyncState = {
   broadcasterLastSeen: number;
   rotation: OrbRotationState | null;
   scene: OrbSceneState | null;
+  lastRotationActionAt: number;
 };
 
 type OrbSyncSnapshot = {
@@ -98,6 +100,7 @@ const getState = (): OrbSyncState => {
       broadcasterLastSeen: 0,
       rotation: null,
       scene: null,
+      lastRotationActionAt: 0,
     };
   }
 
@@ -235,13 +238,23 @@ export async function POST(request: Request) {
     const normalizedY = 0.5 - clamp(y, 0, 1);
     const strength = clamp(confidenceValue ?? 1, 0, 1);
 
-    state.rotation = {
-      yaw: 0,
-      xRotation: -normalizedX * CAMERA_YAW_RANGE * strength,
-      zRotation: normalizedY * CAMERA_TILT_RANGE * strength,
-      updatedAt: Date.now(),
-    };
-    state.broadcasterLastSeen = Date.now();
+    const now = Date.now();
+    const shouldApplyCameraRotation =
+      now - state.lastRotationActionAt > CAMERA_ROTATION_FALLBACK_GRACE_MS;
+
+    // Camera-derived rotation is kept as a fallback for moments when the
+    // explicit rotation stream is stale/unavailable. This avoids camera
+    // packets overriding the calibrated head-follow center while rotation
+    // updates are actively flowing.
+    if (shouldApplyCameraRotation) {
+      state.rotation = {
+        yaw: 0,
+        xRotation: -normalizedX * CAMERA_YAW_RANGE * strength,
+        zRotation: normalizedY * CAMERA_TILT_RANGE * strength,
+        updatedAt: now,
+      };
+    }
+    state.broadcasterLastSeen = now;
 
     return NextResponse.json(createSnapshot(state, true), {
       headers: {
@@ -269,13 +282,15 @@ export async function POST(request: Request) {
       );
     }
 
+    const now = Date.now();
     state.rotation = {
       yaw: clamp(yaw, -ROTATION_YAW_LIMIT, ROTATION_YAW_LIMIT),
       xRotation: clamp(xRotation, -ROTATION_X_LIMIT, ROTATION_X_LIMIT),
       zRotation: clamp(zRotation ?? 0, -ROTATION_Z_LIMIT, ROTATION_Z_LIMIT),
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
-    state.broadcasterLastSeen = Date.now();
+    state.lastRotationActionAt = now;
+    state.broadcasterLastSeen = now;
 
     return NextResponse.json(createSnapshot(state, true), {
       headers: {
