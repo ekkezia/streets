@@ -819,7 +819,7 @@ const LocationMap: React.FC<{
         }
       >
         {isOrbLikeView && <div className="text-center">PLEASE INTERACT WITH THE LOCATION:</div>}
-        📍 [{formatCoordinate(activeLatitude)}°, {formatCoordinate(activeLongitude)}°]
+        <div className="text-center">📍 [{formatCoordinate(activeLatitude)}°, {formatCoordinate(activeLongitude)}°]</div>
         {isOrbLikeView && <div className="text-center">https://streets.e-kezia.com/new-york-city</div>}
       </div>
       <Map
