@@ -394,9 +394,11 @@ export const CONFIG: Config = {
     locationInfo: ["Chinatown"],
     supabaseFolder: "streets_nyc_190426",
     supabasePrefixPath: "streets_nyc_190426",
-    numberOfImages: 29,
+    numberOfImages: 30,
     text: {},
     arrows: {
+      1: [["reverse", 29, "Recalculating routes..."],
+        ["forward", 1, "Begin route!"],],
       2: [["reverse", -1, null],
         ["left", 1, null],],
       14: [["reverse", -1, null],
@@ -409,7 +411,7 @@ export const CONFIG: Config = {
         ["left", -1, "Turn back"],],
       29: [["reverse", -1, null],
         ["left", 1, "Go to All Street"],],
-      30: [["forward", -29, "Restart"]]
+      30: [["reverse", -29, "Restart"]]
     },
     mediaPrefixPath: 'streets_nyc_190426',
     supabaseMediaExtension: "mp4",
@@ -529,6 +531,10 @@ export const CONFIG: Config = {
       29: {
         latitude: 40.716704,
         longitude: -73.993407,
+      },
+      30: {
+        latitude: 40.716746,
+        longitude: -73.993410,
       },
     },
   },

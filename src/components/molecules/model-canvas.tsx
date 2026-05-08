@@ -2207,15 +2207,19 @@ const ModelCanvas: React.FC<{
             path: "/socket.io",
             transports: ["websocket", "polling"],
             reconnection: true,
+            reconnectionAttempts: Infinity,
             reconnectionDelay: 250,
             reconnectionDelayMax: 1500,
+            timeout: 20000,
           })
         : io({
             path: "/api/orb-ws/socket.io",
             transports: ["websocket", "polling"],
             reconnection: true,
+            reconnectionAttempts: Infinity,
             reconnectionDelay: 250,
             reconnectionDelayMax: 1500,
+            timeout: 20000,
           });
       orbSocketRef.current = socket;
 
@@ -2224,12 +2228,18 @@ const ModelCanvas: React.FC<{
         setOrbSyncError(null);
       });
 
-      socket.on("disconnect", () => {
+      socket.on("disconnect", (reason) => {
         orbSocketConnectedRef.current = false;
+        setOrbSyncError(`Socket disconnected: ${reason}`);
       });
 
-      socket.on("connect_error", () => {
+      socket.on("connect_error", (error) => {
         orbSocketConnectedRef.current = false;
+        const message =
+          error && typeof error.message === "string" && error.message.length
+            ? error.message
+            : "unknown";
+        setOrbSyncError(`Socket connect error: ${message}`);
       });
 
       socket.on("orb:rotation", (payload: unknown) => {
@@ -2274,12 +2284,41 @@ const ModelCanvas: React.FC<{
           zRotation,
         });
       });
+
+      // Browser networking can occasionally leave Socket.IO in a disconnected
+      // state without recovering quickly. Keep probing and reconnecting.
+      const reconnectIfNeeded = () => {
+        if (disposed || !socket || socket.connected) {
+          return;
+        }
+        socket.connect();
+      };
+
+      const reconnectWatchdogId = window.setInterval(reconnectIfNeeded, 5000);
+      const handleVisibilityOrFocus = () => {
+        reconnectIfNeeded();
+      };
+      window.addEventListener("visibilitychange", handleVisibilityOrFocus);
+      window.addEventListener("focus", handleVisibilityOrFocus);
+      socket.on("connect", () => {
+        reconnectIfNeeded();
+      });
+
+      return () => {
+        window.clearInterval(reconnectWatchdogId);
+        window.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+        window.removeEventListener("focus", handleVisibilityOrFocus);
+      };
     };
 
-    void connectSocket();
+    let cleanupSocketWatchdog: (() => void) | undefined;
+    void connectSocket().then((cleanup) => {
+      cleanupSocketWatchdog = cleanup;
+    });
 
     return () => {
       disposed = true;
+      cleanupSocketWatchdog?.();
       orbSocketConnectedRef.current = false;
       orbSocketRef.current?.disconnect();
       orbSocketRef.current = null;

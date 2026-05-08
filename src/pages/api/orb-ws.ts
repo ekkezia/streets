@@ -26,6 +26,10 @@ export default function handler(
   if (!res.socket.server.io) {
     const io = new IOServer(res.socket.server, {
       path: "/api/orb-ws/socket.io",
+      // Keep long-lived sessions more resilient when the browser main thread
+      // occasionally stalls (heavy rendering / GC / tab lifecycle events).
+      pingInterval: 25000,
+      pingTimeout: 120000,
       cors: {
         origin: "*",
         methods: ["GET", "POST"],
