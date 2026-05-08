@@ -68,9 +68,29 @@ const bindGlobalAudioUnlockListeners = () => {
     });
   };
 
+  const resumeAllSessionsIfVisible = () => {
+    if (typeof document !== "undefined" && document.hidden) {
+      return;
+    }
+
+    sharedVideoSessions.forEach((session) => {
+      const target = session.videoElement;
+      const shouldPreferUnmuted =
+        session.audioUnlocked || isAudioUnlockRemembered();
+      target.muted = !shouldPreferUnmuted;
+      void target.play().catch(() => {
+        target.muted = true;
+        void target.play().catch(() => {
+          // Ignore autoplay failure for muted fallback.
+        });
+      });
+    });
+  };
+
   window.addEventListener("pointerdown", unlockAllSessions);
   window.addEventListener("keydown", unlockAllSessions);
   window.addEventListener("touchstart", unlockAllSessions);
+  document.addEventListener("visibilitychange", resumeAllSessionsIfVisible);
   globalAudioUnlockListenersBound = true;
 };
 

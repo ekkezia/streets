@@ -2775,6 +2775,7 @@ const ModelCanvas: React.FC<{
       {isOrbLikeMode && <div className="fixed inset-0 z-0 bg-black" />}
       <Canvas
         className={className}
+        dpr={isTouchDevice ? [1, 1.25] : [1, 1.75]}
         orthographic={isOrbLikeMode}
         style={{
           ...(isOrbLikeMode
@@ -2804,6 +2805,8 @@ const ModelCanvas: React.FC<{
             : {}),
         }}
         gl={{
+          antialias: !isTouchDevice,
+          powerPreference: isTouchDevice ? "default" : "high-performance",
           toneMappingExposure: isOrbLikeMode
             ? ORB_TONE_MAPPING_EXPOSURE
             : SPHERE_TONE_MAPPING_EXPOSURE,

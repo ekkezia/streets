@@ -29,6 +29,8 @@ const MEDIAPIPE_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task";
 const SUBJECT_TTL_MS = 3500;
 const POSITION_SMOOTHING = 0.35;
+const MAX_BACKDROP_DPR = 1.5;
+const POSE_DETECTION_INTERVAL_MS = 33;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -132,7 +134,7 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
         return;
       }
 
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, MAX_BACKDROP_DPR);
       const nextWidth = Math.max(1, Math.round(window.innerWidth * dpr));
       const nextHeight = Math.max(1, Math.round(window.innerHeight * dpr));
 
@@ -334,110 +336,138 @@ const SubjectPresence: React.FC<SubjectPresenceProps> = ({
         return;
       }
 
-      poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: MEDIAPIPE_MODEL_URL,
-          delegate: "GPU",
-        },
-        runningMode: "VIDEO",
-        numPoses: 1,
-      });
+      try {
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: MEDIAPIPE_MODEL_URL,
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numPoses: 1,
+        });
+      } catch {
+        // Safari/iPad GPU delegation can become unstable under memory pressure.
+        // Fall back to CPU so tracking can continue instead of hard-stopping.
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: MEDIAPIPE_MODEL_URL,
+            delegate: "CPU",
+          },
+          runningMode: "VIDEO",
+          numPoses: 1,
+        });
+      }
 
       if (disposed) {
         return;
       }
 
+      let lastPoseDetectionAt = 0;
       const trackFrame = () => {
         if (disposed || !poseLandmarker || !videoElement) {
           return;
         }
 
-        if (videoElement.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-          drawBackdropFrame();
-          const nowPerf = performance.now();
-          const result = poseLandmarker.detectForVideo(videoElement, nowPerf);
-          const landmarks = result.landmarks?.[0];
+        try {
+          if (videoElement.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            drawBackdropFrame();
+            const nowPerf = performance.now();
+            const shouldRunDetection =
+              nowPerf - lastPoseDetectionAt >= POSE_DETECTION_INTERVAL_MS;
 
-          if (landmarks?.length) {
-            const nose = landmarks[0];
-            const leftHip = landmarks[23];
-            const rightHip = landmarks[24];
-            const leftShoulder = landmarks[11];
-            const rightShoulder = landmarks[12];
-            const shoulderCenter =
-              leftShoulder && rightShoulder
-                ? {
-                    x: (leftShoulder.x + rightShoulder.x) / 2,
-                    y: (leftShoulder.y + rightShoulder.y) / 2,
-                    z: (leftShoulder.z + rightShoulder.z) / 2,
-                    visibility: Math.min(
-                      leftShoulder.visibility ?? 0,
-                      rightShoulder.visibility ?? 0,
-                    ),
-                  }
-                : null;
-            const hipCenter =
-              leftHip && rightHip
-                ? {
-                    x: (leftHip.x + rightHip.x) / 2,
-                    y: (leftHip.y + rightHip.y) / 2,
-                    z: (leftHip.z + rightHip.z) / 2,
-                    visibility: Math.min(
-                      leftHip.visibility ?? 0,
-                      rightHip.visibility ?? 0,
-                    ),
-                  }
-                : null;
-            const bodyCenter =
-              (nose && (nose.visibility ?? 1) > 0.2
-                ? {
-                    x: nose.x,
-                    y: nose.y,
-                    z: nose.z,
-                    visibility: nose.visibility ?? 1,
-                  }
-                : shoulderCenter) ??
-              hipCenter ?? { x: 0.5, y: 0.5, z: 0, visibility: 0 };
+            if (shouldRunDetection) {
+              lastPoseDetectionAt = nowPerf;
+              const result = poseLandmarker.detectForVideo(videoElement, nowPerf);
+              const landmarks = result.landmarks?.[0];
 
-            const nextX = flipX
-              ? 1 - clamp(bodyCenter.x, 0, 1)
-              : clamp(bodyCenter.x, 0, 1);
-            const nextY = flipY
-              ? 1 - clamp(bodyCenter.y, 0, 1)
-              : clamp(bodyCenter.y, 0, 1);
-            const nextZ = clamp(bodyCenter.z, -2, 2);
-            const nextConfidence = clamp(bodyCenter.visibility ?? 0, 0, 1);
-            const previous = subjectsMap.get(sourceIdRef.current);
+              if (landmarks?.length) {
+                const nose = landmarks[0];
+                const leftHip = landmarks[23];
+                const rightHip = landmarks[24];
+                const leftShoulder = landmarks[11];
+                const rightShoulder = landmarks[12];
+                const shoulderCenter =
+                  leftShoulder && rightShoulder
+                    ? {
+                        x: (leftShoulder.x + rightShoulder.x) / 2,
+                        y: (leftShoulder.y + rightShoulder.y) / 2,
+                        z: (leftShoulder.z + rightShoulder.z) / 2,
+                        visibility: Math.min(
+                          leftShoulder.visibility ?? 0,
+                          rightShoulder.visibility ?? 0,
+                        ),
+                      }
+                    : null;
+                const hipCenter =
+                  leftHip && rightHip
+                    ? {
+                        x: (leftHip.x + rightHip.x) / 2,
+                        y: (leftHip.y + rightHip.y) / 2,
+                        z: (leftHip.z + rightHip.z) / 2,
+                        visibility: Math.min(
+                          leftHip.visibility ?? 0,
+                          rightHip.visibility ?? 0,
+                        ),
+                      }
+                    : null;
+                const bodyCenter =
+                  (nose && (nose.visibility ?? 1) > 0.2
+                    ? {
+                        x: nose.x,
+                        y: nose.y,
+                        z: nose.z,
+                        visibility: nose.visibility ?? 1,
+                      }
+                    : shoulderCenter) ??
+                  hipCenter ?? { x: 0.5, y: 0.5, z: 0, visibility: 0 };
 
-            const trackedSubject: TrackedSubject = {
-              sourceId: sourceIdRef.current,
-              x: previous
-                ? lerp(previous.x, nextX, POSITION_SMOOTHING)
-                : nextX,
-              y: previous
-                ? lerp(previous.y, nextY, POSITION_SMOOTHING)
-                : nextY,
-              z: previous
-                ? lerp(previous.z, nextZ, POSITION_SMOOTHING)
-                : nextZ,
-              confidence: previous
-                ? lerp(previous.confidence, nextConfidence, POSITION_SMOOTHING)
-                : nextConfidence,
-              lastUpdated: Date.now(),
-            };
+                const nextX = flipX
+                  ? 1 - clamp(bodyCenter.x, 0, 1)
+                  : clamp(bodyCenter.x, 0, 1);
+                const nextY = flipY
+                  ? 1 - clamp(bodyCenter.y, 0, 1)
+                  : clamp(bodyCenter.y, 0, 1);
+                const nextZ = clamp(bodyCenter.z, -2, 2);
+                const nextConfidence = clamp(bodyCenter.visibility ?? 0, 0, 1);
+                const previous = subjectsMap.get(sourceIdRef.current);
 
-            upsertSubject(trackedSubject);
-            drawDebugFrame(trackedSubject);
+                const trackedSubject: TrackedSubject = {
+                  sourceId: sourceIdRef.current,
+                  x: previous
+                    ? lerp(previous.x, nextX, POSITION_SMOOTHING)
+                    : nextX,
+                  y: previous
+                    ? lerp(previous.y, nextY, POSITION_SMOOTHING)
+                    : nextY,
+                  z: previous
+                    ? lerp(previous.z, nextZ, POSITION_SMOOTHING)
+                    : nextZ,
+                  confidence: previous
+                    ? lerp(previous.confidence, nextConfidence, POSITION_SMOOTHING)
+                    : nextConfidence,
+                  lastUpdated: Date.now(),
+                };
 
+                upsertSubject(trackedSubject);
+                drawDebugFrame(trackedSubject);
+              } else {
+                drawDebugFrame(null);
+              }
+            } else {
+              drawDebugFrame(subjectsMap.get(sourceIdRef.current) ?? null);
+            }
           } else {
+            drawBackdropFrame();
             drawDebugFrame(null);
           }
-        } else {
-          drawBackdropFrame();
-          drawDebugFrame(null);
+        } catch {
+          // Keep the loop alive on transient MediaPipe/runtime errors.
+          drawDebugFrame(subjectsMap.get(sourceIdRef.current) ?? null);
+        } finally {
+          if (!disposed) {
+            rafId = window.requestAnimationFrame(trackFrame);
+          }
         }
-
-        rafId = window.requestAnimationFrame(trackFrame);
       };
 
       rafId = window.requestAnimationFrame(trackFrame);
