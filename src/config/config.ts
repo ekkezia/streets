@@ -533,8 +533,8 @@ export const CONFIG: Config = {
         longitude: -73.993407,
       },
       30: {
-        latitude: 40.716746,
-        longitude: -73.993410,
+        latitude: 40.716818,
+        longitude: -73.993353,
       },
     },
   },
