@@ -537,9 +537,7 @@ const LocationMap: React.FC<{
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    params.set("autoplay", "off");
-    const query = params.toString();
+    const query = new URLSearchParams(window.location.search).toString();
     router.push(`/${projectId}/${key}${query ? `?${query}` : ""}`);
   };
 
@@ -820,7 +818,7 @@ const LocationMap: React.FC<{
             : undefined
         }
       >
-        📍 [{formatCoordinate(activeLatitude)}°, {formatCoordinate(activeLongitude)}°]
+        {isOrbLikeView && 'PLEASE INTERACT WITH THE LOCATION:'}📍 [{formatCoordinate(activeLatitude)}°, {formatCoordinate(activeLongitude)}°]
       </div>
       <Map
         ref={mapRef}
