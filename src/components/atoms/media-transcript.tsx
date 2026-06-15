@@ -32,7 +32,7 @@ const parseImageKeyFromPathname = (pathname: string | null): number => {
 };
 
 const getTranscriptJsonPath = (projectId: ProjectId) => {
-  return `/assets/transcriptions/${CONFIG[projectId].supabaseFolder}.json`;
+  return `/assets/transcriptions/${CONFIG[projectId].storageFolder}.json`;
 };
 const MEDIA_TRANSCRIPT_SYNC_EVENT = "streets-media-transcript-sync";
 const OVERLAY_LAYOUT_CHANGE_EVENT = "streets-overlay-layout-change";
@@ -44,8 +44,8 @@ const isVideoScene = (projectId: ProjectId, index: number) => {
     return isVideoMediaUrl(indexedMedia);
   }
 
-  const extension = projectConfig.supabaseMediaExtension ?? "jpg";
-  const prefix = projectConfig.mediaPrefixPath ?? projectConfig.supabasePrefixPath;
+  const extension = projectConfig.storageMediaExtension ?? "jpg";
+  const prefix = projectConfig.mediaPrefixPath ?? projectConfig.storagePrefixPath;
   return isVideoMediaUrl(`${prefix}_${index}.${extension}`);
 };
 

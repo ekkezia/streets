@@ -33,6 +33,36 @@ REACT_APP_SHOW_MODE=true
 
 Set `REACT_APP_SHOW_MODE=false` in production.
 
+Media is served from a public Cloudflare R2 bucket. Set its public custom domain
+or `r2.dev` URL without an object path:
+
+```bash
+NEXT_PUBLIC_R2_PUBLIC_URL=https://media.example.com
+```
+
+Without this variable, storage URLs use relative paths.
+
+Media objects are expected at the bucket root by default. For example:
+
+```text
+streets_nyc_190426/streets_nyc_190426_1.mp4
+```
+
+If your bucket stores objects below a shared prefix, set it separately:
+
+```bash
+NEXT_PUBLIC_R2_STORAGE_ROOT=streets
+```
+
+The R2 bucket also needs a CORS policy for the app origin, because the 360
+renderer loads media through browser fetch/video APIs. Update
+`cloudflare-r2-cors.example.json` with the production domain, then apply it:
+
+```bash
+npx wrangler r2 bucket cors set <BUCKET_NAME> --file cloudflare-r2-cors.example.json
+npx wrangler r2 bucket cors list <BUCKET_NAME>
+```
+
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.

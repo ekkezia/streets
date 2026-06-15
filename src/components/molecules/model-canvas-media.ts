@@ -1,4 +1,4 @@
-import { SUPABASE_URL } from "@/config/config";
+import { R2_PUBLIC_URL, STORAGE_ROOT } from "@/config/config";
 
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg"];
 const AUDIO_UNLOCK_SESSION_KEY = "streets_audio_unlocked";
@@ -72,20 +72,28 @@ export const getLocalAssetFallbackPath = (mediaUrl: string) => {
   }
 
   try {
-    const supabasePublicPath = new URL(SUPABASE_URL).pathname.replace(/\/+$/, "");
-    const mediaPath = new URL(mediaUrl, "http://localhost").pathname;
-    const normalizedMediaPath = mediaPath.replace(/\/+$/, "");
-
-    if (!normalizedMediaPath.startsWith(`${supabasePublicPath}/`)) {
+    if (!R2_PUBLIC_URL) {
       return null;
     }
 
-    const relativePath = normalizedMediaPath.slice(supabasePublicPath.length + 1);
+    const r2PublicPath = new URL(R2_PUBLIC_URL).pathname.replace(/\/+$/, "");
+    const mediaPath = new URL(mediaUrl, "http://localhost").pathname;
+    const normalizedMediaPath = mediaPath.replace(/\/+$/, "");
+
+    const storagePrefix = STORAGE_ROOT
+      ? `${r2PublicPath}/${STORAGE_ROOT}/`
+      : `${r2PublicPath}/`;
+
+    if (!normalizedMediaPath.startsWith(storagePrefix)) {
+      return null;
+    }
+
+    const relativePath = normalizedMediaPath.slice(storagePrefix.length);
     if (!relativePath.length) {
       return null;
     }
 
-    return `/assets/images/${relativePath}`;
+    return `/assets/images/${STORAGE_ROOT ? `${STORAGE_ROOT}/` : ""}${relativePath}`;
   } catch {
     return null;
   }

@@ -1,8 +1,22 @@
 import { ArrowDirection } from "@/components/atoms/model-arrow";
 
-// TODO: move to env
-export const SUPABASE_URL =
-  "https://lmgbcuolwhkqoowxnaik.supabase.co/storage/v1/object/public/";
+export const R2_PUBLIC_URL = (
+  process.env.NEXT_PUBLIC_R2_PUBLIC_URL ?? ""
+).replace(/\/+$/, "");
+export const STORAGE_ROOT = (
+  process.env.NEXT_PUBLIC_R2_STORAGE_ROOT ?? ""
+).replace(/^\/+|\/+$/g, "");
+
+export const getStorageObjectKey = (...segments: string[]) =>
+  [STORAGE_ROOT, ...segments]
+    .map((segment) => segment.replace(/^\/+|\/+$/g, ""))
+    .filter(Boolean)
+    .join("/");
+
+export const getStorageUrl = (...segments: string[]) => {
+  const objectKey = getStorageObjectKey(...segments);
+  return R2_PUBLIC_URL ? `${R2_PUBLIC_URL}/${objectKey}` : `/${objectKey}`;
+};
 
 export type ProjectId = "jakarta" | "hong-kong" | "singapore" | "cambodia" | "new-york-city";
 
@@ -22,10 +36,10 @@ export type Config = {
       };
     };
     languageOptions: TLanguage[];
-    supabaseFolder: string;
-    supabasePrefixPath: string;
+    storageFolder: string;
+    storagePrefixPath: string;
     mediaPrefixPath?: string;
-    supabaseMediaExtension?: string;
+    storageMediaExtension?: string;
     defaultRotationOffset?: number | string;
     mediaByIndex?: {
       [key: number]: string;
@@ -72,8 +86,8 @@ export const CONFIG: Config = {
       ["Farid Renais", "Photographer", "farid.renais"],
     ],
     languageOptions: ["id", "en"],
-    supabaseFolder: "streets_jkt_290824",
-    supabasePrefixPath: "streets_jkt_290824",
+    storageFolder: "streets_jkt_290824",
+    storagePrefixPath: "streets_jkt_290824",
     numberOfImages: 69,
     // location info
     locationInfo: ["Pasar Baru", "Lapangan Banteng", "Gedung Kesenian Jakarta"],
@@ -372,8 +386,8 @@ export const CONFIG: Config = {
       },
     },
 
-    supabaseFolder: "streets_hkg_111024",
-    supabasePrefixPath: "streets_hkg_111024",
+    storageFolder: "streets_hkg_111024",
+    storagePrefixPath: "streets_hkg_111024",
     numberOfImages: 76,
     // image subtitle
     text: {},
@@ -392,8 +406,8 @@ export const CONFIG: Config = {
     defaultRotationOffset: -60,
     languageOptions: ["en"],
     locationInfo: ["Chinatown"],
-    supabaseFolder: "streets_nyc_190426",
-    supabasePrefixPath: "streets_nyc_190426",
+    storageFolder: "streets_nyc_190426",
+    storagePrefixPath: "streets_nyc_190426",
     numberOfImages: 30,
     text: {},
     arrows: {
@@ -414,7 +428,7 @@ export const CONFIG: Config = {
       30: [["reverse", -29, "Restart"]]
     },
     mediaPrefixPath: 'streets_nyc_190426',
-    supabaseMediaExtension: "mp4",
+    storageMediaExtension: "mp4",
     location: {
       1: {
         latitude: 40.716746,
@@ -554,8 +568,8 @@ export const CONFIG: Config = {
       },
     },
 
-    supabaseFolder: "streets_sg_161224",
-    supabasePrefixPath: "streets_sg_161224",
+    storageFolder: "streets_sg_161224",
+    storagePrefixPath: "streets_sg_161224",
     numberOfImages: 23,
     // image subtitle
     text: {},
@@ -636,8 +650,8 @@ export const CONFIG: Config = {
       },
     },
 
-    supabaseFolder: "streets_kh",
-    supabasePrefixPath: "streets_kh",
+    storageFolder: "streets_kh",
+    storagePrefixPath: "streets_kh",
     numberOfImages: 77,
     // image subtitle
     text: {},

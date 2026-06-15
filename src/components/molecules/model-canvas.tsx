@@ -26,8 +26,8 @@ import GlassOrbProjection, {
 import {
   CONFIG,
   DirectionTuple,
+  getStorageUrl,
   ProjectId,
-  SUPABASE_URL,
   TLanguage,
 } from "@/config/config";
 import { usePathname, useRouter } from "next/navigation";
@@ -266,18 +266,12 @@ const getMediaPath = (projectId: ProjectId, textureIdx: number) => {
     return perIndexMedia;
   }
 
-  const extension = projectConfig.supabaseMediaExtension ?? "jpg";
-  const prefix = projectConfig.mediaPrefixPath ?? projectConfig.supabasePrefixPath;
+  const extension = projectConfig.storageMediaExtension ?? "jpg";
+  const prefix = projectConfig.mediaPrefixPath ?? projectConfig.storagePrefixPath;
 
-  return (
-    SUPABASE_URL +
-    projectConfig.supabaseFolder +
-    "/" +
-    prefix +
-    "_" +
-    textureIdx +
-    "." +
-    extension
+  return getStorageUrl(
+    projectConfig.storageFolder,
+    `${prefix}_${textureIdx}.${extension}`,
   );
 };
 
