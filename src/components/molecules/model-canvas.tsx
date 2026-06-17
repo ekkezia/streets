@@ -72,15 +72,15 @@ const ORB_WS_SERVER_URL = (
 const ORB_SYNC_WS_BASE_URL = ORB_WS_SERVER_URL || ORB_SYNC_SERVER_URL;
 const getOrbSyncEndpoint = (path: string) =>
   ORB_SYNC_SERVER_URL ? `${ORB_SYNC_SERVER_URL}${path}` : path;
-const PROJECTS_WITH_LOCAL_ASSET_FALLBACK = new Set<ProjectId>([
-  "new-york-city",
-]);
+const PROJECTS_WITH_LOCAL_ASSET_FALLBACK = new Set<ProjectId>();
 const PROJECT_MEDIA_PRELOAD_CONCURRENCY_DESKTOP = 6;
 const PROJECT_MEDIA_PRELOAD_CONCURRENCY_TOUCH = 2;
 const PROJECT_MEDIA_PRIORITY_AHEAD_COUNT = 3;
 const PROJECT_MEDIA_PRIORITY_BEHIND_COUNT = 1;
 const PROJECT_MEDIA_BLOCKING_PRIORITY_COUNT = 1;
+const VIDEO_PRELOAD_TIMEOUT_MS = 8000;
 const preloadedProjects = new Set<ProjectId>();
+const preloadedMediaUrls = new Set<string>();
 const STABLE_VIEWPORT_HEIGHT = "100svh";
 const STABLE_HALF_VIEWPORT_HEIGHT = "50svh";
 let lastTrackingCameraEnabled = false;
@@ -154,11 +154,71 @@ const drainResponseBody = async (response: Response) => {
   }
 };
 
+const preloadVideoSource = (source: string, signal: AbortSignal) =>
+  new Promise<boolean>((resolve) => {
+    if (typeof document === "undefined") {
+      resolve(false);
+      return;
+    }
+
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+
+    const video = document.createElement("video");
+    let timeoutId: number | null = null;
+    let resolved = false;
+
+    const cleanup = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      video.removeEventListener("loadeddata", handleReady);
+      video.removeEventListener("canplay", handleReady);
+      video.removeEventListener("error", handleError);
+      signal.removeEventListener("abort", handleAbort);
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    };
+
+    const finish = (loaded: boolean) => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      cleanup();
+      resolve(loaded);
+    };
+
+    const handleReady = () => finish(true);
+    const handleError = () => finish(false);
+    const handleAbort = () => finish(false);
+
+    video.crossOrigin = "anonymous";
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+
+    video.addEventListener("loadeddata", handleReady);
+    video.addEventListener("canplay", handleReady);
+    video.addEventListener("error", handleError);
+    signal.addEventListener("abort", handleAbort, { once: true });
+
+    timeoutId = window.setTimeout(() => finish(false), VIDEO_PRELOAD_TIMEOUT_MS);
+    video.src = source;
+    video.load();
+  });
+
 const preloadSceneMedia = async (
   mediaUrl: string,
   useLocalAssetFallback: boolean,
   signal: AbortSignal,
-) => {
+): Promise<boolean> => {
   const fallbackMediaUrl = useLocalAssetFallback
     ? getLocalAssetFallbackPath(mediaUrl)
     : null;
@@ -168,6 +228,14 @@ const preloadSceneMedia = async (
 
   for (const source of candidateSources) {
     try {
+      if (isVideoMediaUrl(source)) {
+        const didLoad = await preloadVideoSource(source, signal);
+        if (didLoad) {
+          return true;
+        }
+        continue;
+      }
+
       const response = await fetch(source, {
         cache: "force-cache",
         signal,
@@ -178,13 +246,15 @@ const preloadSceneMedia = async (
       }
 
       await drainResponseBody(response);
-      return;
+      return true;
     } catch {
       if (signal.aborted) {
-        return;
+        return false;
       }
     }
   }
+
+  return false;
 };
 
 const getPrioritizedPreloadIndices = (activeIndex: number, total: number) => {
@@ -1598,13 +1668,24 @@ const ModelCanvas: React.FC<{
     () => getPrioritizedPreloadIndices(textureIndex, mediaUrls.length),
     [mediaUrls.length, textureIndex],
   );
+  const shouldLimitPreloadToNearbyMedia = useMemo(
+    () => mediaUrls.some(isVideoMediaUrl),
+    [mediaUrls],
+  );
+  const preloadOrderedIndices = useMemo(
+    () =>
+      shouldLimitPreloadToNearbyMedia
+        ? prioritizedPreload.orderedIndices.slice(0, prioritizedPreload.priorityCount)
+        : prioritizedPreload.orderedIndices,
+    [prioritizedPreload, shouldLimitPreloadToNearbyMedia],
+  );
 
   useEffect(() => {
     if (shouldHideSecondaryOrbCanvas) {
       return;
     }
 
-    if (preloadedProjects.has(projectId)) {
+    if (!shouldLimitPreloadToNearbyMedia && preloadedProjects.has(projectId)) {
       setProjectMediaPreloadLoaded(mediaUrls.length);
       setProjectMediaPreloadReady(true);
       return;
@@ -1619,39 +1700,55 @@ const ModelCanvas: React.FC<{
     const priorityIndexSet = new Set(
       prioritizedPreload.orderedIndices.slice(0, blockingPriorityCount),
     );
-    let loadedPriorityCount = 0;
+    let loadedPriorityCount = Array.from(priorityIndexSet).filter((index) =>
+      preloadedMediaUrls.has(mediaUrls[index]),
+    ).length;
+    const initiallyLoadedCount = preloadOrderedIndices.filter((index) =>
+      preloadedMediaUrls.has(mediaUrls[index]),
+    ).length;
 
-    setProjectMediaPreloadReady(false);
-    setProjectMediaPreloadLoaded(0);
+    setProjectMediaPreloadReady(
+      blockingPriorityCount === 0 || loadedPriorityCount >= blockingPriorityCount,
+    );
+    setProjectMediaPreloadLoaded(initiallyLoadedCount);
 
-    if (blockingPriorityCount === 0) {
-      setProjectMediaPreloadReady(true);
-    }
+    const markPreloadAttemptComplete = (mediaIndex: number, didLoad: boolean) => {
+      if (didLoad) {
+        preloadedMediaUrls.add(mediaUrls[mediaIndex]);
+      }
+
+      if (priorityIndexSet.has(mediaIndex)) {
+        loadedPriorityCount += 1;
+        if (loadedPriorityCount >= blockingPriorityCount) {
+          setProjectMediaPreloadReady(true);
+        }
+      }
+
+      setProjectMediaPreloadLoaded((count) => count + 1);
+    };
 
     let nextIndex = 0;
     const worker = async () => {
       while (!disposed && !controller.signal.aborted) {
         const preloadOrderIndex = nextIndex;
         nextIndex += 1;
-        if (preloadOrderIndex >= prioritizedPreload.orderedIndices.length) {
+        if (preloadOrderIndex >= preloadOrderedIndices.length) {
           break;
         }
 
-        const mediaIndex = prioritizedPreload.orderedIndices[preloadOrderIndex];
-        await preloadSceneMedia(
+        const mediaIndex = preloadOrderedIndices[preloadOrderIndex];
+        if (preloadedMediaUrls.has(mediaUrls[mediaIndex])) {
+          continue;
+        }
+
+        const didLoad = await preloadSceneMedia(
           mediaUrls[mediaIndex],
           useLocalAssetFallback,
           controller.signal,
         );
 
         if (!disposed) {
-          if (priorityIndexSet.has(mediaIndex)) {
-            loadedPriorityCount += 1;
-            if (loadedPriorityCount >= blockingPriorityCount) {
-              setProjectMediaPreloadReady(true);
-            }
-          }
-          setProjectMediaPreloadLoaded((count) => count + 1);
+          markPreloadAttemptComplete(mediaIndex, didLoad);
         }
       }
     };
@@ -1660,13 +1757,15 @@ const ModelCanvas: React.FC<{
       ? PROJECT_MEDIA_PRELOAD_CONCURRENCY_TOUCH
       : PROJECT_MEDIA_PRELOAD_CONCURRENCY_DESKTOP;
     const workers = Array.from(
-      { length: Math.min(preloadConcurrency, mediaUrls.length) },
+      { length: Math.min(preloadConcurrency, preloadOrderedIndices.length) },
       () => worker(),
     );
 
     void Promise.allSettled(workers).then(() => {
       if (!disposed) {
-        preloadedProjects.add(projectId);
+        if (!shouldLimitPreloadToNearbyMedia) {
+          preloadedProjects.add(projectId);
+        }
         setProjectMediaPreloadReady(true);
       }
     });
@@ -1677,9 +1776,11 @@ const ModelCanvas: React.FC<{
     };
   }, [
     mediaUrls,
+    preloadOrderedIndices,
     prioritizedPreload,
     projectId,
     shouldHideSecondaryOrbCanvas,
+    shouldLimitPreloadToNearbyMedia,
     isTouchDevice,
     useLocalAssetFallback,
   ]);
@@ -2762,9 +2863,15 @@ const ModelCanvas: React.FC<{
   }
 
   if (!projectMediaPreloadReady) {
-    const progressPercent = mediaUrls.length
-      ? Math.round((projectMediaPreloadLoaded / mediaUrls.length) * 100)
+    const preloadProgressTotal = shouldLimitPreloadToNearbyMedia
+      ? preloadOrderedIndices.length
+      : mediaUrls.length;
+    const progressPercent = preloadProgressTotal
+      ? Math.round((projectMediaPreloadLoaded / preloadProgressTotal) * 100)
       : 100;
+    const progressLabel = shouldLimitPreloadToNearbyMedia
+      ? "nearby media"
+      : "images";
 
     return (
       <div className="fixed inset-0 z-[12000] flex items-center justify-center bg-black">
@@ -2779,7 +2886,7 @@ const ModelCanvas: React.FC<{
             />
           </div>
           <div className="mt-2 text-center text-xs text-black/70">
-            {projectMediaPreloadLoaded}/{mediaUrls.length} images
+            {projectMediaPreloadLoaded}/{preloadProgressTotal} {progressLabel}
           </div>
         </div>
       </div>

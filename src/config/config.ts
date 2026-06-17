@@ -6,6 +6,7 @@ export const R2_PUBLIC_URL = (
 export const STORAGE_ROOT = (
   process.env.NEXT_PUBLIC_R2_STORAGE_ROOT ?? ""
 ).replace(/^\/+|\/+$/g, "");
+const MEDIA_VERSION = (process.env.NEXT_PUBLIC_MEDIA_VERSION ?? "").trim();
 
 export const getStorageObjectKey = (...segments: string[]) =>
   [STORAGE_ROOT, ...segments]
@@ -15,7 +16,10 @@ export const getStorageObjectKey = (...segments: string[]) =>
 
 export const getStorageUrl = (...segments: string[]) => {
   const objectKey = getStorageObjectKey(...segments);
-  return R2_PUBLIC_URL ? `${R2_PUBLIC_URL}/${objectKey}` : `/${objectKey}`;
+  const url = R2_PUBLIC_URL ? `${R2_PUBLIC_URL}/${objectKey}` : `/${objectKey}`;
+  return MEDIA_VERSION
+    ? `${url}${url.includes("?") ? "&" : "?"}v=${encodeURIComponent(MEDIA_VERSION)}`
+    : url;
 };
 
 export type ProjectId = "jakarta" | "hong-kong" | "singapore" | "cambodia" | "new-york-city";

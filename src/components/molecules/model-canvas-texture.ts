@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LinearFilter,
   SRGBColorSpace,
@@ -18,13 +18,16 @@ import {
 type SharedVideoSession = {
   videoElement: HTMLVideoElement;
   videoTexture: VideoTexture;
+  stop: () => void;
   audioUnlocked: boolean;
   transcriptSyncKey?: string;
 };
 
 const sharedVideoSessions = new Map<string, SharedVideoSession>();
+const activeVideoSessionKeys = new Set<string>();
 let globalAudioUnlockListenersBound = false;
 const MEDIA_TRANSCRIPT_SYNC_EVENT = "streets-media-transcript-sync";
+const TEXTURE_DISPOSE_AFTER_TRANSITION_MS = 900;
 
 const emitTranscriptSync = (transcriptSyncKey?: string) => {
   if (!transcriptSyncKey || typeof window === "undefined") {
@@ -46,7 +49,11 @@ const bindGlobalAudioUnlockListeners = () => {
   const unlockAllSessions = () => {
     rememberAudioUnlock();
 
-    sharedVideoSessions.forEach((session) => {
+    sharedVideoSessions.forEach((session, sessionKey) => {
+      if (!activeVideoSessionKeys.has(sessionKey)) {
+        return;
+      }
+
       const target = session.videoElement;
       const wasAudioUnlocked = session.audioUnlocked;
       target.muted = false;
@@ -73,7 +80,11 @@ const bindGlobalAudioUnlockListeners = () => {
       return;
     }
 
-    sharedVideoSessions.forEach((session) => {
+    sharedVideoSessions.forEach((session, sessionKey) => {
+      if (!activeVideoSessionKeys.has(sessionKey)) {
+        return;
+      }
+
       const target = session.videoElement;
       const shouldPreferUnmuted =
         session.audioUnlocked || isAudioUnlockRemembered();
@@ -110,6 +121,17 @@ const getOrCreateSharedVideoSession = (sessionKey: string): SharedVideoSession =
   videoElement.preload = "auto";
   videoElement.volume = 1;
   videoElement.muted = !isAudioUnlockRemembered();
+  videoElement.disablePictureInPicture = true;
+  videoElement.style.position = "fixed";
+  videoElement.style.left = "0";
+  videoElement.style.top = "0";
+  videoElement.style.width = "1px";
+  videoElement.style.height = "1px";
+  videoElement.style.opacity = "0";
+  videoElement.style.pointerEvents = "none";
+  videoElement.style.zIndex = "-1";
+  videoElement.setAttribute("aria-hidden", "true");
+  document.body.appendChild(videoElement);
 
   const videoTexture = new VideoTexture(videoElement);
   videoTexture.colorSpace = SRGBColorSpace;
@@ -117,9 +139,18 @@ const getOrCreateSharedVideoSession = (sessionKey: string): SharedVideoSession =
   videoTexture.magFilter = LinearFilter;
   videoTexture.generateMipmaps = false;
 
+  const stop = () => {
+    videoElement.pause();
+    videoElement.muted = true;
+    videoElement.removeAttribute("src");
+    videoElement.load();
+    videoElement.remove();
+  };
+
   const nextSession: SharedVideoSession = {
     videoElement,
     videoTexture,
+    stop,
     audioUnlocked: isAudioUnlockRemembered(),
     transcriptSyncKey: undefined,
   };
@@ -135,8 +166,8 @@ const stopSharedVideoSession = (sessionKey: string) => {
     return;
   }
 
-  session.videoElement.pause();
-  session.videoElement.muted = true;
+  session.stop();
+  sharedVideoSessions.delete(sessionKey);
 };
 
 export const useActiveMediaTexture = (
@@ -146,6 +177,59 @@ export const useActiveMediaTexture = (
   transcriptSyncKey?: string,
 ) => {
   const [activeTexture, setActiveTexture] = useState<Texture | null>(null);
+  const activeTextureRef = useRef<Texture | null>(null);
+  const ownedImageTexturesRef = useRef(new Set<Texture>());
+  const disposeTimeoutsRef = useRef<number[]>([]);
+
+  const disposeOwnedTexture = useCallback((texture: Texture) => {
+    if (!ownedImageTexturesRef.current.has(texture)) {
+      return;
+    }
+
+    ownedImageTexturesRef.current.delete(texture);
+    texture.dispose();
+  }, []);
+
+  const scheduleOwnedTextureDisposal = useCallback((texture: Texture) => {
+    if (!ownedImageTexturesRef.current.has(texture)) {
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      disposeOwnedTexture(texture);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (activeTextureRef.current !== texture) {
+        disposeOwnedTexture(texture);
+      }
+    }, TEXTURE_DISPOSE_AFTER_TRANSITION_MS);
+    disposeTimeoutsRef.current.push(timeoutId);
+  }, [disposeOwnedTexture]);
+
+  const setDisplayedTexture = useCallback((texture: Texture | null) => {
+    const previousTexture = activeTextureRef.current;
+    if (previousTexture && previousTexture !== texture) {
+      scheduleOwnedTextureDisposal(previousTexture);
+    }
+
+    activeTextureRef.current = texture;
+    setActiveTexture(texture);
+  }, [scheduleOwnedTextureDisposal]);
+
+  useEffect(
+    () => () => {
+      disposeTimeoutsRef.current.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      ownedImageTexturesRef.current.forEach((texture) => {
+        texture.dispose();
+      });
+      ownedImageTexturesRef.current.clear();
+    },
+    [disposeOwnedTexture],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -157,11 +241,13 @@ export const useActiveMediaTexture = (
       : null;
 
     if (isVideoMediaUrl(mediaUrl)) {
-      const session = getOrCreateSharedVideoSession(sessionKey);
+      const videoSessionKey = `${sessionKey}:${mediaUrl}`;
+      const session = getOrCreateSharedVideoSession(videoSessionKey);
       const videoElement = session.videoElement;
       let hasAttemptedFallback = false;
       let hasDispatchedInitialTranscriptSync = false;
       let previousVideoTime = videoElement.currentTime;
+      activeVideoSessionKeys.add(videoSessionKey);
       session.audioUnlocked = session.audioUnlocked || isAudioUnlockRemembered();
       session.transcriptSyncKey = transcriptSyncKey;
 
@@ -225,6 +311,20 @@ export const useActiveMediaTexture = (
         previousVideoTime = currentTime;
       };
 
+      const displayVideoWhenReady = () => {
+        if (disposed) {
+          return;
+        }
+
+        if (videoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+          return;
+        }
+
+        session.videoTexture.needsUpdate = true;
+        ownedImageTexturesRef.current.add(session.videoTexture);
+        setDisplayedTexture(session.videoTexture);
+      };
+
       videoElement.addEventListener("playing", handleVideoPlaying);
       videoElement.addEventListener("timeupdate", handleVideoTimeUpdate);
       cleanupTranscriptHandlers = () => {
@@ -253,14 +353,28 @@ export const useActiveMediaTexture = (
           return;
         }
 
-        setActiveTexture(null);
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("Failed to load video media", {
+            mediaUrl,
+            code: videoElement.error?.code,
+            message: videoElement.error?.message,
+          });
+        }
+
+        if (!activeTextureRef.current) {
+          setDisplayedTexture(null);
+        }
       };
 
       videoElement.addEventListener("error", handleVideoError);
+      videoElement.addEventListener("loadeddata", displayVideoWhenReady);
+      videoElement.addEventListener("canplay", displayVideoWhenReady);
       videoElement.addEventListener("loadedmetadata", retryPlaybackWhenReady);
       videoElement.addEventListener("canplay", retryPlaybackWhenReady);
       cleanupVideoHandlers = () => {
         videoElement.removeEventListener("error", handleVideoError);
+        videoElement.removeEventListener("loadeddata", displayVideoWhenReady);
+        videoElement.removeEventListener("canplay", displayVideoWhenReady);
         videoElement.removeEventListener(
           "loadedmetadata",
           retryPlaybackWhenReady,
@@ -268,8 +382,10 @@ export const useActiveMediaTexture = (
         videoElement.removeEventListener("canplay", retryPlaybackWhenReady);
       };
 
-      setActiveTexture(session.videoTexture);
       setVideoSource(mediaUrl);
+      if (videoElement.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        displayVideoWhenReady();
+      }
     } else {
       stopSharedVideoSession(sessionKey);
 
@@ -286,7 +402,8 @@ export const useActiveMediaTexture = (
             }
             texture.colorSpace = SRGBColorSpace;
             localTexture = texture;
-            setActiveTexture(texture);
+            ownedImageTexturesRef.current.add(texture);
+            setDisplayedTexture(texture);
           },
           undefined,
           () => {
@@ -300,7 +417,9 @@ export const useActiveMediaTexture = (
               return;
             }
 
-            setActiveTexture(null);
+            if (!activeTextureRef.current) {
+              setDisplayedTexture(null);
+            }
           },
         );
       };
@@ -311,19 +430,27 @@ export const useActiveMediaTexture = (
     return () => {
       disposed = true;
 
-      if (localTexture) {
-        setActiveTexture((current) => (current === localTexture ? null : current));
-        localTexture.dispose();
+      if (localTexture && activeTextureRef.current !== localTexture) {
+        disposeOwnedTexture(localTexture);
       }
 
       cleanupVideoHandlers?.();
       cleanupTranscriptHandlers?.();
 
       if (isVideoMediaUrl(mediaUrl)) {
-        stopSharedVideoSession(sessionKey);
+        const videoSessionKey = `${sessionKey}:${mediaUrl}`;
+        activeVideoSessionKeys.delete(videoSessionKey);
+        stopSharedVideoSession(videoSessionKey);
       }
     };
-  }, [mediaUrl, sessionKey, transcriptSyncKey, useLocalAssetFallback]);
+  }, [
+    disposeOwnedTexture,
+    mediaUrl,
+    sessionKey,
+    setDisplayedTexture,
+    transcriptSyncKey,
+    useLocalAssetFallback,
+  ]);
 
   return activeTexture;
 };
